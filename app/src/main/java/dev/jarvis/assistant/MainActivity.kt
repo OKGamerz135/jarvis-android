@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
@@ -32,8 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jarvis.assistant.ui.settings.PersonalIntelligenceScreen
+import dev.jarvis.assistant.ui.settings.ProviderScreen
+import dev.jarvis.assistant.ui.settings.SettingsHubScreen
 import dev.jarvis.assistant.ui.theme.JarvisTheme
-import dev.jarvis.assistant.update.UpdateSection
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,22 +47,28 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { Home, Settings }
+private enum class Screen(val title: String, val parent: Screen?) {
+    Home("JARVIS", null),
+    Settings("Settings", Home),
+    PersonalIntelligence("Personal Intelligence", Settings),
+    Provider("AI provider and key", Settings),
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun JarvisApp() {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
-    BackHandler(enabled = screen != Screen.Home) { screen = Screen.Home }
+    val parent = screen.parent
+    BackHandler(enabled = parent != null) { if (parent != null) screen = parent }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(if (screen == Screen.Home) "JARVIS" else "Settings") },
+                title = { Text(screen.title) },
                 navigationIcon = {
-                    if (screen != Screen.Home) {
-                        IconButton(onClick = { screen = Screen.Home }) {
+                    if (parent != null) {
+                        IconButton(onClick = { screen = parent }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     }
@@ -77,9 +83,16 @@ private fun JarvisApp() {
             )
         },
     ) { padding ->
+        val modifier = Modifier.padding(padding)
         when (screen) {
-            Screen.Home -> HomeScreen(Modifier.padding(padding))
-            Screen.Settings -> SettingsScreen(Modifier.padding(padding))
+            Screen.Home -> HomeScreen(modifier)
+            Screen.Settings -> SettingsHubScreen(
+                onOpenPersonalIntelligence = { screen = Screen.PersonalIntelligence },
+                onOpenProvider = { screen = Screen.Provider },
+                modifier = modifier,
+            )
+            Screen.PersonalIntelligence -> PersonalIntelligenceScreen(modifier)
+            Screen.Provider -> ProviderScreen(modifier)
         }
     }
 }
@@ -100,23 +113,10 @@ private fun HomeScreen(modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "Skeleton build. No chat, voice or AI yet. Those arrive in the next steps.",
+            "Settings are live. Chat, voice and AI replies arrive in the next steps.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-@Composable
-private fun SettingsScreen(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        UpdateSection()
     }
 }
