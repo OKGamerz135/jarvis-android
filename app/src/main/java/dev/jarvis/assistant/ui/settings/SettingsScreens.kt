@@ -44,7 +44,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.LinearProgressIndicator
+import dev.jarvis.assistant.ai.ConnectionTestViewModel
 import dev.jarvis.assistant.ai.PromptBuilder
+import dev.jarvis.assistant.ai.TestState
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.Humour
 import dev.jarvis.assistant.settings.JarvisSettings
@@ -208,14 +211,19 @@ private fun PersonalIntelligenceContent(s: JarvisSettings, vm: SettingsViewModel
 // ------------------------------------------------------------ provider
 
 @Composable
-fun ProviderScreen(modifier: Modifier = Modifier, vm: SettingsViewModel = viewModel()) {
+fun ProviderScreen(
+    modifier: Modifier = Modifier,
+    vm: SettingsViewModel = viewModel(),
+    testVm: ConnectionTestViewModel = viewModel(),
+) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val keys by vm.keyPresent.collectAsStateWithLifecycle()
+    val notice by vm.notice.collectAsStateWithLifecycle()
     val current = settings
     if (current == null) {
         Loading(modifier)
     } else {
-        ProviderContent(current, keys, vm, modifier)
+        ProviderContent(current, keys, notice, vm, testVm, modifier)
     }
 }
 
@@ -223,7 +231,9 @@ fun ProviderScreen(modifier: Modifier = Modifier, vm: SettingsViewModel = viewMo
 private fun ProviderContent(
     s: JarvisSettings,
     keys: Map<AiProvider, Boolean>,
+    notice: String?,
     vm: SettingsViewModel,
+    testVm: ConnectionTestViewModel,
     modifier: Modifier,
 ) {
     val provider = s.provider
@@ -329,6 +339,17 @@ private fun ProviderContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (notice != null) {
+            Text(
+                notice,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (notice.startsWith("Couldn't")) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        SectionTitle("Test the connection")
+        ConnectionTest(provider, hasKey && acknowledged, testVm)
 
         Text(
             "About your key: it is stored encrypted with Android's Keystore and is never written into the app " +
@@ -343,6 +364,71 @@ private fun ProviderContent(
 }
 
 private const val MIN_KEY_LENGTH = 20
+
+@Composable
+private fun ConnectionTest(provider: AiProvider, ready: Boolean, vm: ConnectionTestViewModel) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    var prompt by remember { mutableStateOf("Introduce yourself in two sentences.") }
+
+    if (provider == AiProvider.GROQ) {
+        Text(
+            "Groq's connection arrives in Step 5. Select Gemini above to test.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        return
+    }
+
+    Text(
+        "Sends one message through ${provider.label} using your Personal Intelligence settings. " +
+            "This counts against your free quota and is sent to ${provider.label}.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        value = prompt,
+        onValueChange = { prompt = it.take(500) },
+        label = { Text("Test message") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Button(
+        enabled = ready && prompt.isNotBlank() && state !is TestState.Running,
+        onClick = { vm.run(prompt.trim()) },
+    ) { Text("Send test message") }
+    if (!ready) {
+        Text(
+            "Needs a saved key and the \"I understand\" box ticked.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    when (val t = state) {
+        TestState.Idle -> {}
+        is TestState.Running -> Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (t.text.isEmpty()) Text("Waiting for ${provider.label}...") else Text(t.text)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+        is TestState.Done -> Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t.text)
+                Text(
+                    "Answered by ${t.provider} (${t.model}) in ${"%.1f".format(t.millis / 1000.0)} s",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        is TestState.Failed -> Text(t.message, color = MaterialTheme.colorScheme.error)
+    }
+}
 
 // ------------------------------------------------------------- helpers
 

@@ -66,4 +66,6 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     testImplementation(libs.junit)
+    // Android's own org.json is a stub in unit tests, so tests use the real library.
+    testImplementation(libs.org.json)
 }

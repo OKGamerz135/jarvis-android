@@ -3,6 +3,7 @@ package dev.jarvis.assistant.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,18 +29,41 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.update(transform) }
     }
 
+    private val _notice = MutableStateFlow<String?>(null)
+
+    /** A short message about the last key action, or null. Failures show here instead of crashing. */
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
     fun saveKey(provider: AiProvider, key: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            keys.save(provider.keyName, key.filterNot { it.isWhitespace() })
+            try {
+                keys.save(provider.keyName, key.filterNot { it.isWhitespace() })
+                _notice.value = "Key saved."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _notice.value = "Couldn't save the key: ${e.javaClass.simpleName}: ${e.message}"
+            }
             refreshKeys()
         }
     }
 
     fun removeKey(provider: AiProvider) {
         viewModelScope.launch(Dispatchers.IO) {
-            keys.remove(provider.keyName)
+            try {
+                keys.remove(provider.keyName)
+                _notice.value = "Key removed."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _notice.value = "Couldn't remove the key: ${e.javaClass.simpleName}: ${e.message}"
+            }
             refreshKeys()
         }
+    }
+
+    fun clearNotice() {
+        _notice.value = null
     }
 
     private fun refreshKeys() {

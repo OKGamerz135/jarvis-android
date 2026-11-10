@@ -113,7 +113,7 @@ private fun HomeScreen(modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "Settings are live. Chat, voice and AI replies arrive in the next steps.",
+            "Settings and the Gemini connection are live. Open Settings, then AI provider and key, to send a test message. Chat arrives in the next step.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
