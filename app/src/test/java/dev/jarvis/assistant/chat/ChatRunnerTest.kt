@@ -248,6 +248,6 @@ class ChatRunnerTest {
         assertTrue(failed.problem!!.message.contains("internet"))
         assertEquals(SendResult.ACCEPTED, r.send("two"))
         val finished = r.awaitState { !it.generating && it.conversation.messages.last().role == ChatRole.ASSISTANT }
-        assertEquals(4, finished.conversation.messages.size)
+        assertEquals(listOf("one", "two", "ok"), finished.conversation.messages.map { it.text })
     }
 }
