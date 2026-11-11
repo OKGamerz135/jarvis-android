@@ -1,6 +1,5 @@
 package dev.jarvis.assistant.ai
 
-import com.sun.net.httpserver.HttpServer
 import dev.jarvis.assistant.diag.CallKind
 import dev.jarvis.assistant.diag.DiagnosticEntry
 import dev.jarvis.assistant.diag.DiagnosticsSink
@@ -13,13 +12,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
-import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.SocketException
 import java.util.concurrent.CopyOnWriteArrayList
 
 class GeminiProviderTest {
     private class Hit(val method: String, val uri: String, val keyHeader: String?)
 
-    private lateinit var server: HttpServer
+    private lateinit var server: ServerSocket
     private val hits = CopyOnWriteArrayList<Hit>()
     private val entries = CopyOnWriteArrayList<DiagnosticEntry>()
     private val sleeps = CopyOnWriteArrayList<Long>()
@@ -31,24 +32,54 @@ class GeminiProviderTest {
 
     @Before
     fun start() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { ex ->
-            hits += Hit(ex.requestMethod, ex.requestURI.toString(), ex.requestHeaders.getFirst("x-goog-api-key"))
-            ex.requestBody.readBytes()
-            val bytes = body.toByteArray()
-            ex.responseHeaders.add("Content-Type", contentType)
-            ex.sendResponseHeaders(status, bytes.size.toLong())
-            ex.responseBody.use { it.write(bytes) }
-        }
-        server.start()
+        server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        Thread {
+            while (!server.isClosed) {
+                val socket = try { server.accept() } catch (e: SocketException) { break }
+                try {
+                    socket.soTimeout = 5000
+                    val input = socket.getInputStream().buffered()
+                    fun line(): String {
+                        val sb = StringBuilder()
+                        while (true) {
+                            val c = input.read()
+                            if (c < 0 || c == '\n'.code) break
+                            if (c != '\r'.code) sb.append(c.toChar())
+                        }
+                        return sb.toString()
+                    }
+                    val first = line().split(" ")
+                    var length = 0
+                    var keyHeader: String? = null
+                    while (true) {
+                        val h = line()
+                        if (h.isEmpty()) break
+                        val name = h.substringBefore(":").lowercase()
+                        val value = h.substringAfter(":").trim()
+                        if (name == "content-length") length = value.toInt()
+                        if (name == "x-goog-api-key") keyHeader = value
+                    }
+                    repeat(length) { input.read() }
+                    hits += Hit(first[0], first[1], keyHeader)
+                    val bytes = body.toByteArray()
+                    val head = "HTTP/1.1 $status X\r\nContent-Type: $contentType\r\n" +
+                        "Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+                    socket.getOutputStream().apply { write(head.toByteArray()); write(bytes); flush() }
+                } catch (e: Exception) {
+                    // a closed or timed-out client is fine for a test server
+                } finally {
+                    socket.close()
+                }
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     @After
-    fun stop() = server.stop(0)
+    fun stop() = server.close()
 
     private fun provider() = GeminiProvider(
         sink = object : DiagnosticsSink { override fun record(entry: DiagnosticEntry) { entries += entry } },
-        baseUrl = "http://127.0.0.1:${server.address.port}",
+        baseUrl = "http://127.0.0.1:${server.localPort}",
         sleeper = { sleeps += it },
     )
 
@@ -169,7 +200,7 @@ class GeminiProviderTest {
 
     @Test
     fun connectionRefusedIsOffline() {
-        server.stop(0)
+        server.close()
         try {
             runBlocking { provider().checkModel(key, "m") }
             fail("expected exception")
