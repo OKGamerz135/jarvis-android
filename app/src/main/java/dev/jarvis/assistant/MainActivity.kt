@@ -30,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jarvis.assistant.diag.DiagnosticsLog
+import dev.jarvis.assistant.ui.settings.DiagnosticsScreen
 import dev.jarvis.assistant.ui.settings.PersonalIntelligenceScreen
 import dev.jarvis.assistant.ui.settings.ProviderScreen
 import dev.jarvis.assistant.ui.settings.SettingsHubScreen
@@ -39,6 +41,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        DiagnosticsLog.init(applicationContext)
         setContent {
             JarvisTheme {
                 JarvisApp()
@@ -52,6 +55,7 @@ private enum class Screen(val title: String, val parent: Screen?) {
     Settings("Settings", Home),
     PersonalIntelligence("Personal Intelligence", Settings),
     Provider("AI provider and key", Settings),
+    Diagnostics("Diagnostics log", Settings),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,10 +93,12 @@ private fun JarvisApp() {
             Screen.Settings -> SettingsHubScreen(
                 onOpenPersonalIntelligence = { screen = Screen.PersonalIntelligence },
                 onOpenProvider = { screen = Screen.Provider },
+                onOpenDiagnostics = { screen = Screen.Diagnostics },
                 modifier = modifier,
             )
             Screen.PersonalIntelligence -> PersonalIntelligenceScreen(modifier)
             Screen.Provider -> ProviderScreen(modifier)
+            Screen.Diagnostics -> DiagnosticsScreen(modifier)
         }
     }
 }

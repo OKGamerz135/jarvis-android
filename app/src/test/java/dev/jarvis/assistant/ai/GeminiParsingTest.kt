@@ -58,7 +58,24 @@ class GeminiParsingTest {
     @Test
     fun serverErrorsAreNotQuotaProblems() {
         assertEquals(LlmError.ServerTrouble(503), GeminiParsing.parseError(503, """{"error":{"code":503}}""", "m", now))
-        assertEquals(LlmError.ServerTrouble(500), GeminiParsing.parseError(500, "", "m", now))
+        assertEquals(LlmError.NotFromApi(500, ""), GeminiParsing.parseError(500, "", "m", now))
+    }
+
+    @Test
+    fun googleStatusDecidesBeforeTheHttpNumber() {
+        val unavailable = """{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}"""
+        assertEquals(LlmError.Overloaded("The model is overloaded."), GeminiParsing.parseError(503, unavailable, "m", now))
+        val internal = """{"error":{"code":500,"message":"oops","status":"INTERNAL"}}"""
+        assertEquals(LlmError.InternalError("oops"), GeminiParsing.parseError(500, internal, "m", now))
+        val parsed = GeminiParsing.parseFailure(503, unavailable, "m", now)
+        assertEquals("UNAVAILABLE", parsed.apiStatus)
+    }
+
+    @Test
+    fun nonGoogleHtml503IsNotBlamedOnGoogle() {
+        val e = GeminiParsing.parseError(503, "<html><body>Service Unavailable</body></html>", "m", now)
+        assertTrue(e is LlmError.NotFromApi)
+        assertTrue(!(e as LlmError.NotFromApi).snippet.contains("<"))
     }
 
     @Test

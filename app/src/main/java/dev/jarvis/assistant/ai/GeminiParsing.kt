@@ -1,10 +1,13 @@
 package dev.jarvis.assistant.ai
 
+import dev.jarvis.assistant.diag.Redactor
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
+
+data class ParsedError(val error: LlmError, val apiStatus: String?, val apiMessage: String?)
 
 /** Request building and response/error reading for the Gemini REST API. No networking here, so it is unit-testable. */
 object GeminiParsing {
@@ -27,7 +30,7 @@ object GeminiParsing {
             .toString()
     }
 
-    /** Pulls the reply text out of one streamed chunk. Throws [LlmException] if the prompt was blocked. */
+    /** Pulls the reply text out of one streamed chunk or a whole non-streamed reply. Throws if the prompt was blocked. */
     fun textOf(payload: String): String {
         val root = try {
             JSONObject(payload)
@@ -54,21 +57,82 @@ object GeminiParsing {
         return out.toString()
     }
 
-    fun parseError(status: Int, body: String, model: String, now: Instant): LlmError {
+    /** Reads a models.get reply. An unreadable reply still counts as "the model exists" because the status was 200. */
+    fun parseModelInfo(body: String, requested: String): ModelInfo {
+        val root = try {
+            JSONObject(body)
+        } catch (e: JSONException) {
+            return ModelInfo(requested, null, emptyList())
+        }
+        val methods = root.optJSONArray("supportedGenerationMethods")
+        val list = ArrayList<String>()
+        for (i in 0 until (methods?.length() ?: 0)) list += methods!!.optString(i)
+        return ModelInfo(
+            id = root.optString("name").removePrefix("models/").ifEmpty { requested },
+            displayName = root.optString("displayName").ifEmpty { null },
+            methods = list,
+        )
+    }
+
+    fun parseError(status: Int, body: String, model: String, now: Instant): LlmError =
+        parseFailure(status, body, model, now).error
+
+    /**
+     * Classifies a failed call by Google's own error status first (UNAVAILABLE, INTERNAL, ...) and only then by
+     * the HTTP number, because the HTTP number alone can't tell overload from misconfiguration.
+     */
+    fun parseFailure(
+        status: Int,
+        body: String,
+        model: String,
+        now: Instant,
+        secrets: List<String> = emptyList(),
+    ): ParsedError {
         val error = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
-        val message = error?.optString("message").orEmpty()
+        val apiStatus = error?.optString("status")?.takeIf { it.isNotEmpty() }
+        val rawMessage = error?.optString("message").orEmpty()
+        val message = Redactor.clean(rawMessage, secrets, 300).ifEmpty { null }
+        val classified = classify(status, error, apiStatus, rawMessage, message, body, model, now, secrets)
+        return ParsedError(classified, apiStatus, message)
+    }
+
+    private fun classify(
+        status: Int,
+        error: JSONObject?,
+        apiStatus: String?,
+        rawMessage: String,
+        message: String?,
+        body: String,
+        model: String,
+        now: Instant,
+        secrets: List<String>,
+    ): LlmError {
+        val mentionsKey = rawMessage.contains("API key", true)
+        when (apiStatus) {
+            "UNAVAILABLE" -> return LlmError.Overloaded(message)
+            "INTERNAL" -> return LlmError.InternalError(message)
+            "DEADLINE_EXCEEDED" -> return LlmError.Timeout(message)
+            "FAILED_PRECONDITION" -> return LlmError.BillingRequired(message)
+            "UNAUTHENTICATED" -> return LlmError.InvalidKey
+            "PERMISSION_DENIED" -> return if (mentionsKey) LlmError.InvalidKey else LlmError.PermissionDenied(message)
+            "NOT_FOUND" -> return LlmError.ModelNotFound(model)
+            "INVALID_ARGUMENT" -> return if (mentionsKey) LlmError.InvalidKey else LlmError.InvalidRequest(message)
+            "RESOURCE_EXHAUSTED" -> return classify429(error, now)
+        }
         return when (status) {
             400 ->
-                if (message.contains("API key", true)) LlmError.InvalidKey
-                else LlmError.Other(message.ifBlank { "The provider rejected the request (HTTP 400)." })
+                if (mentionsKey) LlmError.InvalidKey
+                else LlmError.Other(message ?: "The provider rejected the request (HTTP 400).")
             401 -> LlmError.InvalidKey
             403 ->
-                if (message.contains("API key", true)) LlmError.InvalidKey
-                else LlmError.Other("Access denied by the provider: ${message.ifBlank { "no details given" }}")
+                if (mentionsKey) LlmError.InvalidKey
+                else LlmError.Other("Access denied by the provider: ${message ?: "no details given"}")
             404 -> LlmError.ModelNotFound(model)
             429 -> classify429(error, now)
-            500, 502, 503, 504 -> LlmError.ServerTrouble(status)
-            else -> LlmError.Other("The provider answered with HTTP $status. $message".trim())
+            500, 502, 503, 504 ->
+                if (error != null) LlmError.ServerTrouble(status)
+                else LlmError.NotFromApi(status, Redactor.clean(body, secrets, 200))
+            else -> LlmError.Other("The provider answered with HTTP $status. ${message ?: ""}".trim())
         }
     }
 
