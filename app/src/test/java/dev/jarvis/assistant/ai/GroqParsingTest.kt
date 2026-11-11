@@ -93,7 +93,7 @@ class GroqParsingTest {
 
     @Test
     fun durations() {
-        assertEquals(733L, GroqParsing.parseDuration("7m12.5s."))
+        assertEquals(433L, GroqParsing.parseDuration("7m12.5s."))
         assertEquals(2L, GroqParsing.parseDuration("1.5s"))
         assertEquals(1L, GroqParsing.parseDuration("340ms"))
         assertEquals(null, GroqParsing.parseDuration("soon"))
