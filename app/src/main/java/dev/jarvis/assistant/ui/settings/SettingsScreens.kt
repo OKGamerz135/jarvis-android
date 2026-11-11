@@ -354,7 +354,7 @@ private fun ProviderContent(
             )
         }
 
-        ProviderTools(provider, hasKey && acknowledged, testVm)
+        ProviderTools(provider, hasKey && acknowledged, testVm) { vm.update { it.copy(provider = AiProvider.GROQ) } }
 
         Text(
             "About your key: it is stored encrypted with Android's Keystore and is never written into the app " +

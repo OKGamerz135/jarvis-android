@@ -27,15 +27,12 @@ import dev.jarvis.assistant.ai.TestState
 import dev.jarvis.assistant.settings.AiProvider
 
 @Composable
-internal fun ProviderTools(provider: AiProvider, ready: Boolean, vm: ConnectionTestViewModel) {
-    if (provider == AiProvider.GROQ) {
-        SectionTitle("Test the connection")
-        Text(
-            "Groq's checks arrive in Build 5. Select Gemini above to test.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        return
-    }
+internal fun ProviderTools(
+    provider: AiProvider,
+    ready: Boolean,
+    vm: ConnectionTestViewModel,
+    onTryGroq: () -> Unit,
+) {
     if (!ready) {
         Text(
             "Checks need a saved key and the \"I understand\" box ticked.",
@@ -44,7 +41,7 @@ internal fun ProviderTools(provider: AiProvider, ready: Boolean, vm: ConnectionT
         )
     }
     AvailabilityCard(provider, ready, vm)
-    GenerationCard(provider, ready, vm)
+    GenerationCard(provider, ready, vm, onTryGroq)
     DiagnosticsCard(ready, vm)
 }
 
@@ -103,9 +100,10 @@ private fun AvailabilityCard(provider: AiProvider, ready: Boolean, vm: Connectio
 }
 
 @Composable
-private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionTestViewModel) {
+private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionTestViewModel, onTryGroq: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val used by vm.generationCalls24h.collectAsStateWithLifecycle()
+    val usage by vm.generationCalls24h.collectAsStateWithLifecycle()
+    val used = usage[provider.label] ?: 0
     var prompt by remember { mutableStateOf("Introduce yourself in two sentences.") }
 
     SectionTitle("2. Generation test")
@@ -125,7 +123,7 @@ private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionT
         enabled = ready && prompt.isNotBlank() && state !is TestState.Running,
         onClick = { vm.runTest(prompt.trim()) },
     ) { Text("Send test message") }
-    Hint("Generation requests from this phone in the last 24 hours, failed ones included: $used")
+    Hint("${provider.label} generation requests from this phone in the last 24 hours, failed ones included: $used")
 
     when (val t = state) {
         TestState.Idle -> {}
@@ -142,7 +140,17 @@ private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionT
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-        is TestState.Failed -> Panel { FailureBlock(t.message, t.details) }
+        is TestState.Failed -> Panel {
+            FailureBlock(t.message, t.details)
+            if (t.offerAlternative) {
+                Text(
+                    "Gemini is still overloaded after 2 retries. You can switch to Groq yourself. Nothing is sent " +
+                        "to Groq until you tap Send test message there, and Groq needs its own key and \"I understand\" box.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Button(onClick = onTryGroq) { Text("Try Groq instead") }
+            }
+        }
     }
 }
 

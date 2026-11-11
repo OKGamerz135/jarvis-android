@@ -243,15 +243,15 @@ class GeminiProvider(
 
 object Providers {
     private val gemini = GeminiProvider(DiagnosticsLog)
+    private val groq = GroqProvider(DiagnosticsLog)
 
-    /** Null means "no adapter for this provider yet". */
-    fun forProvider(provider: AiProvider): LlmProvider? = when (provider) {
+    fun forProvider(provider: AiProvider): LlmProvider = when (provider) {
         AiProvider.GEMINI -> gemini
-        AiProvider.GROQ -> null
+        AiProvider.GROQ -> groq
     }
 
-    fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics? = when (provider) {
+    fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics = when (provider) {
         AiProvider.GEMINI -> gemini
-        AiProvider.GROQ -> null
+        AiProvider.GROQ -> groq
     }
 }

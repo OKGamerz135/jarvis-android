@@ -38,53 +38,53 @@ object DiagnosticsVerdict {
         }
     }
 
-    fun verdict(check: Outcome, stream: Outcome, once: Outcome): String {
-        if (check is Outcome.Fail) return checkFailed(check.error)
+    fun verdict(check: Outcome, stream: Outcome, once: Outcome, name: String = "Google"): String {
+        if (check is Outcome.Fail) return checkFailed(check.error, name)
         if (check !is Outcome.Ok) return "The availability check didn't run, so there is nothing to conclude yet."
 
         return when (stream) {
             is Outcome.Ok ->
-                "Everything works: Google was reached, your key is accepted, the model exists and streaming returned a reply. " +
-                    "Earlier 503s were most likely temporary overload on Google's side."
+                "Everything works: $name was reached, your key is accepted, the model exists and streaming returned a reply. " +
+                    "Any earlier server errors were most likely temporary overload on $name's side."
             is Outcome.Skipped ->
                 "The availability check passed (key accepted, model exists), but I skipped the generation steps: ${stream.reason}."
-            is Outcome.Fail -> streamFailed(stream, once)
+            is Outcome.Fail -> streamFailed(stream, once, name)
         }
     }
 
-    private fun checkFailed(error: LlmError): String = when (error) {
+    private fun checkFailed(error: LlmError, name: String): String = when (error) {
         LlmError.Offline ->
-            "Google couldn't be reached at all, so this is a network problem on your side. Try mobile data instead of Wi-Fi, or turn off any VPN."
+            "$name couldn't be reached at all, so this is a network problem on your side. Try mobile data instead of Wi-Fi, or turn off any VPN."
         is LlmError.NotFromApi ->
-            "Something other than Google's API answered the lookup. That points at your network (Wi-Fi, VPN, proxy or ISP), not at Google, your key or JARVIS."
+            "Something other than $name's API answered the lookup. That points at your network (Wi-Fi, VPN, proxy or ISP), not at $name, your key or JARVIS."
         LlmError.InvalidKey, is LlmError.PermissionDenied ->
-            "Google was reached but rejects this key or project. The model name and JARVIS's request aren't the issue."
+            "$name was reached but rejects this key or project. The model name and JARVIS's request aren't the issue."
         is LlmError.BillingRequired ->
-            "Google was reached but says the free tier isn't available for this project or region. JARVIS will not enable billing; use another provider instead."
+            "$name was reached but says the free tier isn't available for this project or region. JARVIS will not enable billing; use another provider instead."
         is LlmError.ModelNotFound ->
-            "Google was reached and accepted the key, but this model name isn't available to your key. Edit the model name in provider settings."
+            "$name was reached and accepted the key, but this model name isn't available to your key. Edit the model name in provider settings."
         else ->
             "Even the lookup, which makes no generation call, failed: ${ErrorMessages.of(error)} " +
-                "So Google's API itself looks unwell right now, or something is in the way."
+                "So $name's API itself looks unwell right now, or something is in the way."
     }
 
-    private fun streamFailed(stream: Outcome.Fail, once: Outcome): String {
+    private fun streamFailed(stream: Outcome.Fail, once: Outcome, name: String): String {
         if (!isServerSide(stream.error)) {
             return "Key and model are fine, but generation failed: ${ErrorMessages.of(stream.error)}"
         }
         return when (once) {
             is Outcome.Ok ->
                 "Streaming fails but non-streaming works, with the same key and model. " +
-                    "That points at JARVIS's streaming code, not at Google's capacity. Copy the diagnostics log and send it to me."
+                    "That points at JARVIS's streaming code, not at $name's capacity. Copy the diagnostics log and send it to me."
             is Outcome.Fail ->
                 if (isServerSide(once.error)) {
-                    "Google reports a server-side problem for both streaming and non-streaming requests, while the key and the model lookup work. " +
-                        "So it isn't your key, the model name or JARVIS's request format. Wait and try again later; a second provider is coming in Build 5."
+                    "$name reports a server-side problem for both streaming and non-streaming requests, while the key and the model lookup work. " +
+                        "So it isn't your key, the model name or JARVIS's request format. Wait and try again later, or switch provider by hand."
                 } else {
                     "Streaming hit a server-side error, and the non-streamed comparison failed differently: ${ErrorMessages.of(once.error)}"
                 }
             is Outcome.Skipped ->
-                "Streaming hit a server-side error and the non-streamed comparison was skipped (${once.reason}), so I can't separate Google's capacity from JARVIS's streaming code yet."
+                "Streaming hit a server-side error and the non-streamed comparison was skipped (${once.reason}), so I can't separate $name's capacity from JARVIS's streaming code yet."
         }
     }
 }

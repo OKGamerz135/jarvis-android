@@ -37,7 +37,8 @@ interface LlmProvider {
 }
 
 data class ModelInfo(val id: String, val displayName: String?, val methods: List<String>) {
-    val canGenerate: Boolean get() = "generateContent" in methods
+    /** Gemini lists "generateContent"; Groq's model list has no methods, so the adapter adds "chat.completions". */
+    val canGenerate: Boolean get() = "generateContent" in methods || "chat.completions" in methods
 }
 
 /** Extra calls used only by the diagnostics tools. */

@@ -27,7 +27,8 @@ sealed interface TestState {
     data object Idle : TestState
     data class Running(val text: String, val note: String?) : TestState
     data class Done(val text: String, val millis: Long, val provider: String, val model: String, val attempts: Int) : TestState
-    data class Failed(val message: String, val details: String?) : TestState
+    /** [offerAlternative] is true only after an "overloaded" error survived every retry; the UI then shows a manual button. */
+    data class Failed(val message: String, val details: String?, val offerAlternative: Boolean = false) : TestState
 }
 
 /** The availability check: asks whether the key can see the model. Generates nothing, uses no generation quota. */
@@ -61,16 +62,19 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     private val _diag = MutableStateFlow<DiagState>(DiagState.Idle)
     val diagnostics: StateFlow<DiagState> = _diag.asStateFlow()
 
-    /** Generation HTTP attempts this phone made to Gemini in the last 24 hours, failed ones included. */
-    val generationCalls24h: StateFlow<Int> = DiagnosticsLog.entries
-        .map { UsageGuard.generationCalls(it, AiProvider.GEMINI.label, System.currentTimeMillis() - UsageGuard.DAY_MS) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+    /** Generation HTTP attempts this phone made per provider in the last 24 hours, failed ones included. */
+    val generationCalls24h: StateFlow<Map<String, Int>> = DiagnosticsLog.entries
+        .map { list ->
+            val since = System.currentTimeMillis() - UsageGuard.DAY_MS
+            AiProvider.entries.associate { it.label to UsageGuard.generationCalls(list, it.label, since) }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     private class Ready(
         val settings: JarvisSettings,
         val provider: AiProvider,
         val llm: LlmProvider,
-        val tools: ProviderDiagnostics?,
+        val tools: ProviderDiagnostics,
         val key: String,
         val model: String,
     )
@@ -85,7 +89,6 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
         val settings = repo.settings.first()
         val provider = settings.provider
         val llm = Providers.forProvider(provider)
-            ?: return Preflight.Stop(ErrorMessages.of(LlmError.Unsupported("${provider.label} (arrives in Build 5)")))
         if (provider !in settings.acknowledged) return Preflight.Stop(ErrorMessages.of(LlmError.NotAcknowledged))
         val key = withContext(Dispatchers.IO) { keys.read(provider.keyName) }
         if (key.isNullOrBlank()) return Preflight.Stop(ErrorMessages.of(LlmError.NoKey))
@@ -113,10 +116,6 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
                     is Preflight.Go -> p.ready
                 }
                 val tools = ready.tools
-                if (tools == null) {
-                    _avail.value = AvailabilityState.Failed("This provider has no availability check yet.", null)
-                    return@launch
-                }
                 val info = tools.checkModel(ready.key, ready.model)
                 _avail.value = AvailabilityState.Ok(ready.provider.label, ready.model, info.displayName, info.canGenerate)
             } catch (e: LlmException) {
@@ -136,6 +135,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
         testJob = viewModelScope.launch {
             _test.value = TestState.Running("", null)
             var retries = 0
+            var lastProvider: AiProvider? = null
             try {
                 val ready = when (val p = preflight()) {
                     is Preflight.Stop -> {
@@ -144,6 +144,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     is Preflight.Go -> p.ready
                 }
+                lastProvider = ready.provider
                 val wait = cooldownLeftMs(ready.provider)
                 if (wait > 0) {
                     _test.value = TestState.Failed(cooldownMessage(wait), null)
@@ -177,7 +178,9 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: LlmException) {
                 val tries = retries + 1
                 val suffix = if (retries > 0) " I tried $tries times." else ""
-                _test.value = TestState.Failed(ErrorMessages.of(e.error) + suffix, FailureFormatter.details(e.context, tries))
+                val offer = e.error is LlmError.Overloaded && retries >= MAX_RETRIES &&
+                    lastProvider == AiProvider.GEMINI
+                _test.value = TestState.Failed(ErrorMessages.of(e.error) + suffix, FailureFormatter.details(e.context, tries), offer)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -201,10 +204,6 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
                     is Preflight.Go -> p.ready
                 }
                 val tools = ready.tools
-                if (tools == null) {
-                    _diag.value = DiagState.Failed("This provider has no diagnostics yet.")
-                    return@launch
-                }
 
                 // Step 1: no generation, no generation quota.
                 _diag.value = DiagState.Running("1 of 3: availability check (no generation)")
@@ -246,7 +245,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _diag.value = DiagState.Done(
                     DiagnosticsVerdict.lines(check, stream, once),
-                    DiagnosticsVerdict.verdict(check, stream, once),
+                    DiagnosticsVerdict.verdict(check, stream, once, ready.provider.label),
                 )
             } catch (e: CancellationException) {
                 throw e

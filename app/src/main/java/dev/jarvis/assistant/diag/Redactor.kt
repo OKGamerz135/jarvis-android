@@ -10,6 +10,7 @@ object Redactor {
     private val bearer = Regex("(?i)bearer\\s+[0-9A-Za-z._\\-]{8,}")
     private val email = Regex("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}")
     private val project = Regex("projects/\\d+")
+    private val org = Regex("\\borg_[0-9A-Za-z]+")
 
     // 10 or more digits, optionally separated by single spaces, dashes or brackets (phone numbers, IDs).
     // Dates such as 2026-11-10 have only 8 digits, so they survive.
@@ -29,6 +30,7 @@ object Redactor {
         t = bearer.replace(t, "Bearer [key]")
         t = email.replace(t, "[email]")
         t = project.replace(t, "projects/[id]")
+        t = org.replace(t, "org_[id]")
         t = phone.replace(t, "[number]")
         // Long random-looking strings that contain digits are probably tokens. Long words without digits
         // (such as Google's quota IDs) are kept because they explain which limit was hit.
