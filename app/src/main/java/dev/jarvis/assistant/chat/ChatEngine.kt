@@ -8,6 +8,8 @@ import dev.jarvis.assistant.ai.LlmException
 import dev.jarvis.assistant.ai.LlmProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -59,6 +61,8 @@ class ChatEngine(
         val reply = StringBuilder()
         try {
             llm.stream(request, options).collect { chunk ->
+                // After Stop, nothing more may be appended or shown, even if a chunk was already in flight.
+                currentCoroutineContext().ensureActive()
                 reply.append(chunk)
                 onPartial(reply.toString())
             }

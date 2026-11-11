@@ -8,6 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import dev.jarvis.assistant.chat.SendResult
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -95,6 +99,38 @@ fun ChatScreen(
             )
         }
 
+        if (ui.generating) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (ui.stopping) "Stopping..." else "JARVIS is answering...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(enabled = !ui.stopping, onClick = vm::stop) { Text("Stop") }
+            }
+        }
+        ui.rejection?.let { text ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = vm::dismissRejection) { Text("OK") }
+            }
+        }
+
+        // The button and the keyboard's Send action share this one function, and so the same lock.
+        val submit: () -> Unit = {
+            if (vm.send(input) == SendResult.ACCEPTED) {
+                input = ""
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
@@ -106,18 +142,10 @@ fun ChatScreen(
                 placeholder = { Text("Message JARVIS") },
                 modifier = Modifier.weight(1f),
                 maxLines = 5,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
             )
-            if (ui.generating) {
-                OutlinedButton(onClick = vm::stop) { Text("Stop") }
-            } else {
-                Button(
-                    enabled = input.isNotBlank(),
-                    onClick = {
-                        vm.send(input)
-                        input = ""
-                    },
-                ) { Text("Send") }
-            }
+            Button(enabled = input.isNotBlank() && !ui.generating, onClick = { submit() }) { Text("Send") }
         }
     }
 }
@@ -146,10 +174,8 @@ private fun Bubble(m: StoredMessage) {
         BubbleBody(
             mine = mine,
             text = m.text,
-            footer = if (mine) null else buildList {
-                if (m.provider != null) add(m.provider + (m.model?.let { " · $it" } ?: ""))
-                if (m.interrupted) add("reply cut short")
-            }.joinToString(" · ").ifEmpty { null },
+            footer = if (mine) null else m.provider?.let { it + (m.model?.let { model -> " · $model" } ?: "") },
+            interrupted = m.interrupted,
         )
     }
 }
@@ -159,7 +185,7 @@ private fun LiveBubble(text: String?, note: String?) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
         Column(Modifier.fillMaxWidth(0.88f)) {
             if (!text.isNullOrEmpty()) {
-                BubbleBody(mine = false, text = text, footer = null)
+                BubbleBody(mine = false, text = text, footer = null, interrupted = false)
             } else {
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -173,7 +199,7 @@ private fun LiveBubble(text: String?, note: String?) {
 }
 
 @Composable
-private fun BubbleBody(mine: Boolean, text: String, footer: String?) {
+private fun BubbleBody(mine: Boolean, text: String, footer: String?, interrupted: Boolean) {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
@@ -182,6 +208,14 @@ private fun BubbleBody(mine: Boolean, text: String, footer: String?) {
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             SelectionContainer { Text(text, style = MaterialTheme.typography.bodyLarge) }
+            if (interrupted) {
+                Text(
+                    "Response interrupted",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             if (footer != null) {
                 Text(
                     footer,

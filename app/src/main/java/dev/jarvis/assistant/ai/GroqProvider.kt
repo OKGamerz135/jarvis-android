@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -107,8 +108,8 @@ class GroqProvider(
         val path = CHAT_PATH
         val call = Call(CallKind.GENERATE_STREAM, "POST", request.model, path, request.apiKey, request.sizeInChars(), attempt)
         val conn = open(path, "POST", request.apiKey, 60_000)
-        val cancelHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { conn.disconnect() }
         try {
+            withDisconnectOnCancel(conn) {
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept", "text/event-stream")
@@ -137,10 +138,12 @@ class GroqProvider(
             }
             if (!gotText) throw call.failed(status, null, "no text returned", LlmError.Blocked("the model returned no text"))
             call.ok(status, limitsNote(conn))
+            }
         } catch (e: IOException) {
+            // A cancelled request closes its own socket; that is not a network failure.
+            currentCoroutineContext().ensureActive()
             throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
         } finally {
-            cancelHandle?.dispose()
             conn.disconnect()
         }
     }
