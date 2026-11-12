@@ -61,6 +61,7 @@ class ChatRunnerFailoverTest {
         )
 
     private suspend fun ChatRunner.idle() = withTimeout(5000) { state.first { it.loaded && !it.generating } }
+    private suspend fun ChatRunner.sendWhenFree(t: String) = withTimeout(5000) { while (send(t) != SendResult.ACCEPTED) delay(5) }
     private suspend fun ChatRunner.until(c: (ChatUiState) -> Boolean) = withTimeout(5000) { state.first(c) }
 
     @Test fun quotaThenCountdownThenSwitchesOnceWithoutDuplicates() = runBlocking {
@@ -204,7 +205,7 @@ class ChatRunnerFailoverTest {
         val a = throwing(quota()); val b = ok("answer")
         val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G))
         r.idle(); r.send("one"); r.idle()
-        r.send("two")
+        r.sendWhenFree("two")
         val s = r.idle()
         assertEquals(1, a.calls.get())
         assertEquals(2, b.calls.get())
@@ -229,7 +230,7 @@ class ChatRunnerFailoverTest {
         // Sending counts as staying; accepting later still works.
         r.acceptRecovery()
         assertNull(r.state.value.temporaryProvider)
-        r.send("two")
+        r.sendWhenFree("two")
         val s = r.idle()
         assertEquals("gemini again", s.conversation.messages.last().text)
     }

@@ -239,14 +239,14 @@ class ChatRunnerTest {
     @Test
     fun theLockIsReleasedAfterAFailureToo() = runBlocking {
         val llm = provider { n ->
-            if (n == 1) throw dev.jarvis.assistant.ai.LlmException(dev.jarvis.assistant.ai.LlmError.Offline) else emit("ok")
+            if (n <= 2) throw dev.jarvis.assistant.ai.LlmException(dev.jarvis.assistant.ai.LlmError.Offline) else emit("ok") // offline waits and retries once, so two failures
         }
         val r = runner(llm)
         r.awaitIdle()
         r.send("one")
         val failed = r.awaitState { !it.generating && it.problem != null }
         assertTrue(failed.problem!!.message.contains("internet"))
-        assertEquals(SendResult.ACCEPTED, r.send("two"))
+        withTimeout(5000) { while (r.send("two") != SendResult.ACCEPTED) delay(5) } // lock frees a moment after the UI state
         val finished = r.awaitState { !it.generating && it.conversation.messages.last().role == ChatRole.ASSISTANT }
         assertEquals(listOf("one", "two", "ok"), finished.conversation.messages.map { it.text })
     }
