@@ -410,7 +410,7 @@ class ChatRunnerFailoverTest {
         val second = r.until { it.dispatch?.adapter == "GroqFake" }.dispatch!!
         assertFalse(second.simulated)
         assertEquals(G, second.requested)
-        r.idle()
+        assertEquals(R, r.idle().temporaryProvider)
     }
 
     // ------------------------------------------------------------------ trace content
