@@ -220,6 +220,7 @@ class ChatRunnerTest {
         val r = runner(llm)
         r.awaitIdle()
         r.send("one")
+        r.awaitState { it.conversation.awaitingReply } // the user's message is added a moment after send() returns
         // The last message is the user's, so retry looks possible, but the lock still refuses.
         assertEquals(SendResult.BUSY, r.retry())
         gate.complete(Unit)
