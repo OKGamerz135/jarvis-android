@@ -395,7 +395,9 @@ class ChatRunnerFailoverTest {
         assertEquals(real.temporaryProvider, simulated.temporaryProvider)
         assertEquals(real.dispatch!!.adapter, simulated.dispatch!!.adapter) // retry went to the Groq adapter both times
         assertEquals(R.label, simulated.conversation.messages.last().provider)
-        assertEquals(realTrace.map { it.first }, traces.map { it.stage }) // same decision and attempt events
+        // The simulated run adds one clearly labelled line for the fake first attempt; everything else is identical.
+        assertEquals(1, traces.count { it.adapter == "SimulatedQuotaProvider" })
+        assertEquals(realTrace.map { it.first }, traces.filter { it.adapter != "SimulatedQuotaProvider" }.map { it.stage })
         assertTrue(ledger2.isExhausted(G)) // and it was recorded as exhausted just like a real error
     }
 
