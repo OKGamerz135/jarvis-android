@@ -13,10 +13,13 @@ import java.util.Locale
 enum class CallKind(val label: String) {
     AVAILABILITY("Availability check"),
     GENERATE_STREAM("Generation, streamed"),
-    GENERATE_ONCE("Generation, not streamed");
+    GENERATE_ONCE("Generation, not streamed"),
 
-    /** Only availability checks are free of generation quota. */
-    val usesGenerationQuota: Boolean get() = this != AVAILABILITY
+    /** A failover trace line written by JARVIS itself. It is not an HTTP call and never counts as quota use. */
+    FAILOVER("Failover trace");
+
+    /** Availability checks and failover trace lines are free of generation quota. */
+    val usesGenerationQuota: Boolean get() = this == GENERATE_STREAM || this == GENERATE_ONCE
 }
 
 /**

@@ -115,6 +115,21 @@ fun ChatScreen(
             }
         }
 
+        ui.dispatch?.let { d ->
+            Text(
+                "Last request: ${d.line}" + if (d.simulated) " (simulated, nothing sent)" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (d.mismatch) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            )
+            Text(
+                "Confirmed by the adapter: ${d.stageText}." + if (d.mismatch) " WARNING: adapter does not match the provider." else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (d.mismatch) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            )
+        }
+
         val temp = ui.temporaryProvider
         if (temp != null && !ui.generating) {
             Row(

@@ -3,6 +3,7 @@ package dev.jarvis.assistant.chat
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.settings.SecureKeyStore
 import dev.jarvis.assistant.settings.SettingsRepository
@@ -22,6 +23,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         source = AndroidProviderSource(SettingsRepository(app), SecureKeyStore(app), ledger),
         ledger = ledger,
         network = AndroidNetworkWatcher(app),
+        trace = DiagnosticsTraceSink(DiagnosticsLog, { DiagnosticsLog.entries.value }),
     )
 
     val state: StateFlow<ChatUiState> = runner.state

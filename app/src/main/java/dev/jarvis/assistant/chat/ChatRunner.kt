@@ -72,6 +72,8 @@ data class ChatUiState(
     val recoveryOffer: AiProvider? = null,
     /** True after "simulate quota exhaustion" was armed for the next message. */
     val simulationArmed: Boolean = false,
+    /** Which adapter really handled the latest attempt. Null until an adapter has been invoked. */
+    val dispatch: DispatchInfo? = null,
 )
 
 enum class SendResult { ACCEPTED, EMPTY, BUSY }
@@ -108,6 +110,7 @@ class ChatRunner(
     private val countdownSeconds: Int = 5,
     private val tickMs: Long = 1000,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    private val trace: TraceSink = NoTrace,
 ) {
     private val gate = SendGate()
     private var job: Job? = null
@@ -343,6 +346,8 @@ class ChatRunner(
         val tried = LinkedHashSet<AiProvider>()
         var waitedRate = false
         var waitedNet = false
+        var requestedFirst: AiProvider? = null
+        var switchedFrom: Triple<AiProvider, String, String?>? = null // provider, model, classification
 
         while (true) {
             val ready = when (val r = source.resolve(provider)) {
@@ -353,6 +358,7 @@ class ChatRunner(
                 is Resolved.Ready -> r
             }
             val current = ready.target.provider
+            if (requestedFirst == null) requestedFirst = current
             tried += current
             val snap = source.snapshot()
 
@@ -366,13 +372,14 @@ class ChatRunner(
                     null,
                 )
             } else {
-                val llm: LlmProvider = if (simulateNext.getAndSet(false)) {
+                val simulated = simulateNext.getAndSet(false)
+                val llm: LlmProvider = if (simulated) {
                     _state.update { it.copy(simulationArmed = false) }
                     SimulatedQuotaProvider(Instant.ofEpochMilli(clock()))
                 } else {
                     ready.llm
                 }
-                when (val result = generate(ready, llm)) {
+                when (val result = generate(ready, llm, requestedFirst ?: current, simulated, switchedFrom)) {
                     is GenResult.Success -> {
                         ledger.clear(current) // it just worked, so whatever we remembered is out of date
                         _state.update { it.copy(conversation = result.conversation) }
@@ -399,6 +406,17 @@ class ChatRunner(
             )
             when (val d = FailoverPolicy.decide(error, ctx)) {
                 is Decision.Switch -> {
+                    switchedFrom = Triple(current, ready.target.model, error?.javaClass?.simpleName)
+                    trace.record(
+                        TraceEvent(
+                            originalProvider = current, originalModel = ready.target.model,
+                            classification = error?.javaClass?.simpleName,
+                            fallbackProvider = d.to.provider, fallbackModel = d.to.model,
+                            adapter = null, stage = "decision: switch after countdown",
+                            streamStarted = false, responseReceived = false,
+                            dispatchedAtMillis = clock(), result = "pending",
+                        ),
+                    )
                     val note = resetNote(current)
                     if (!countdown(current, d.to, note)) {
                         _state.update { it.copy(problem = cancelledProblem(current)) }
@@ -502,14 +520,33 @@ class ChatRunner(
         }
     }
 
-    private suspend fun generate(r: Resolved.Ready, llm: LlmProvider): GenResult {
+    private suspend fun generate(
+        r: Resolved.Ready,
+        llmIn: LlmProvider,
+        requested: AiProvider,
+        simulated: Boolean,
+        switchedFrom: Triple<AiProvider, String, String?>?,
+    ): GenResult {
         val label = r.target.providerLabel
+        var dispatchedAt = 0L
+        var streamStarted = false
+        val llm = TracingLlm(
+            llmIn,
+            onDispatched = {
+                dispatchedAt = clock()
+                setDispatch(requested, r.target, llmIn, DispatchStage.DISPATCHED, simulated)
+            },
+            onFirstText = {
+                streamStarted = true
+                setDispatch(requested, r.target, llmIn, DispatchStage.STREAMING, simulated)
+            },
+        )
         val events = object : CallEvents {
             override fun onRetry(retryNumber: Int, maxRetries: Int, waitMs: Long) {
                 _state.update { it.copy(note = "$label is overloaded. Retrying $retryNumber of $maxRetries in ${(waitMs + 500) / 1000} s...") }
             }
         }
-        return withContext(io) {
+        val result = withContext(io) {
             engine.generate(
                 conv = _state.value.conversation,
                 target = r.target,
@@ -518,6 +555,29 @@ class ChatRunner(
                 onPartial = { text -> _state.update { it.copy(streaming = text, note = null) } },
             )
         }
+        val ok = result is GenResult.Success
+        if (dispatchedAt != 0L) {
+            setDispatch(requested, r.target, llmIn, if (ok) DispatchStage.FINISHED_OK else DispatchStage.FINISHED_FAILED, simulated)
+            if (switchedFrom != null || simulated) {
+                val err = (result as? GenResult.Failure)?.error
+                trace.record(
+                    TraceEvent(
+                        originalProvider = switchedFrom?.first, originalModel = switchedFrom?.second,
+                        classification = switchedFrom?.third,
+                        fallbackProvider = r.target.provider, fallbackModel = r.target.model,
+                        adapter = llm.adapterName, stage = "attempt finished",
+                        streamStarted = streamStarted, responseReceived = ok,
+                        dispatchedAtMillis = dispatchedAt,
+                        result = if (ok) "success" else "failed: ${err?.javaClass?.simpleName ?: "unknown"}",
+                    ),
+                )
+            }
+        }
+        return result
+    }
+
+    private fun setDispatch(requested: AiProvider, t: ChatTarget, llm: LlmProvider, stage: DispatchStage, simulated: Boolean) {
+        _state.update { it.copy(dispatch = DispatchInfo(requested, t.provider, llm.javaClass.simpleName, t.model, stage, simulated)) }
     }
 
     companion object {

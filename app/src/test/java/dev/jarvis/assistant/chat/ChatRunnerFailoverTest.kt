@@ -39,7 +39,7 @@ class ChatRunnerFailoverTest {
 
     @After fun tearDown() = scope.cancel()
 
-    private class Fake(val block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : LlmProvider {
+    private open class Fake(val block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : LlmProvider {
         val calls = AtomicInteger(0)
         val requests = java.util.concurrent.CopyOnWriteArrayList<ChatRequest>()
         override fun stream(request: ChatRequest, options: CallOptions): Flow<String> {
@@ -54,11 +54,18 @@ class ChatRunnerFailoverTest {
     private fun ok(text: String) = Fake { emit(text) }
     private fun throwing(e: LlmException) = Fake { throw e }
 
+    private val traces = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+
     private fun runner(source: FakeSource, countdown: Int = 2) =
         ChatRunner(
             storage, ChatEngine(storage), scope, Dispatchers.IO, source.also { it.ledger = ledger }, ledger, net,
             clock = { now }, countdownSeconds = countdown, tickMs = 20,
+            trace = object : TraceSink { override fun record(event: TraceEvent) { traces += event } },
         )
+
+    private class GeminiFake(block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : Fake(block)
+    private class GroqFake(block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : Fake(block)
+
 
     private suspend fun ChatRunner.idle() = withTimeout(5000) { state.first { it.loaded && !it.generating } }
     private suspend fun ChatRunner.sendWhenFree(t: String) = withTimeout(5000) { while (send(t) != SendResult.ACCEPTED) delay(5) }
@@ -273,5 +280,161 @@ class ChatRunnerFailoverTest {
         r.cancelFailover()
         val s = r.idle()
         assertEquals(listOf("hi"), s.conversation.messages.map { it.text })
+    }
+
+    // ------------------------------------------------------------------ both directions, metadata, adapter identity
+
+
+    @Test fun geminiQuotaToGroqUsesGroqAdapterModelAndKeyAndLabelsTheReply() = runBlocking {
+        val a = GeminiFake { throw quota() }
+        val b = GroqFake { emit("groq answer") }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        val reply = s.conversation.messages.last()
+        assertEquals(R.label, reply.provider)
+        assertEquals("model-${R.name}", reply.model)
+        assertEquals(1, a.calls.get())
+        assertEquals(1, b.calls.get())
+        assertEquals("model-${R.name}", b.requests.single().model) // Groq's own model, not Gemini's
+        assertEquals("KEY", b.requests.single().apiKey)
+        val d = s.dispatch!!
+        assertEquals(G, d.requested)
+        assertEquals(R, d.actual)
+        assertEquals("GroqFake", d.adapter)
+        assertEquals(DispatchStage.FINISHED_OK, d.stage)
+        assertFalse(d.mismatch)
+        assertEquals("${G.label} \u2192 GroqFake \u2192 model-${R.name}", d.line)
+    }
+
+    @Test fun groqQuotaToGeminiWorksTheOtherWayRound() = runBlocking {
+        val a = GeminiFake { emit("gemini answer") }
+        val b = GroqFake { throw quota() }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = R))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        val reply = s.conversation.messages.last()
+        assertEquals(G.label, reply.provider)
+        assertEquals("model-${G.name}", reply.model)
+        assertEquals(1, b.calls.get())
+        assertEquals(1, a.calls.get())
+        assertEquals("model-${G.name}", a.requests.single().model)
+        assertEquals(listOf("hello", "gemini answer"), s.conversation.messages.map { it.text })
+        assertEquals(G, s.temporaryProvider)
+        assertEquals(R, s.preferredProvider)
+        assertEquals("GeminiFake", s.dispatch!!.adapter)
+        assertEquals(R, s.dispatch!!.requested)
+    }
+
+    @Test fun exhaustedAdapterIsNeverReusedForTheRetry() = runBlocking {
+        val a = GeminiFake { throw quota() }
+        val b = GroqFake { emit("ok") }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G))
+        r.idle(); r.send("one")
+        r.idle()
+        r.sendWhenFree("two")
+        r.idle()
+        assertEquals(1, a.calls.get()) // Gemini was asked exactly once in total
+        assertEquals(2, b.calls.get())
+    }
+
+    @Test fun fallbackThatAlsoFailsShowsItsErrorAndDoesNotBounceBack() = runBlocking {
+        val a = GeminiFake { throw quota() }
+        val b = GroqFake { throw fail(LlmError.Overloaded(null)) }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(1, a.calls.get())
+        assertEquals(1, b.calls.get())
+        assertNotNull(s.problem)
+        assertEquals(listOf("hello"), s.conversation.messages.map { it.text }) // no duplicate user message
+        assertEquals(DispatchStage.FINISHED_FAILED, s.dispatch!!.stage)
+        assertEquals("GroqFake", s.dispatch!!.adapter)
+    }
+
+    @Test fun bothProvidersOutOfQuotaStopsWithAnExplanation() = runBlocking {
+        val a = GeminiFake { throw quota() }
+        val b = GroqFake { throw quota() }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(1, a.calls.get())
+        assertEquals(1, b.calls.get())
+        assertTrue(s.problem!!.message.contains("No other provider is ready"))
+        assertEquals(listOf("hello"), s.conversation.messages.map { it.text })
+    }
+
+    // ------------------------------------------------------------------ simulation follows the real path
+
+    @Test fun simulatedQuotaTakesTheSamePathAsRealQuotaAndTheRetryIsReal() = runBlocking {
+        val realA = GeminiFake { throw quota() }
+        val realB = GroqFake { emit("groq answer") }
+        val sim = GeminiFake { emit("gemini must not be called") }
+        val rReal = runner(FakeSource(mapOf(G to realA, R to realB), preferred = G))
+        rReal.idle(); rReal.send("hello")
+        val real = rReal.idle()
+        val realTrace = traces.map { it.stage to it.result }
+        traces.clear()
+
+        val scope2 = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val storage2 = FileChatStorage(Files.createTempDirectory("fo2").toFile())
+        val ledger2 = newLedger { now }
+        val rSim = ChatRunner(
+            storage2, ChatEngine(storage2), scope2, Dispatchers.IO,
+            FakeSource(mapOf(G to sim, R to realB), preferred = G).also { it.ledger = ledger2 }, ledger2, net,
+            clock = { now }, countdownSeconds = 2, tickMs = 20,
+            trace = object : TraceSink { override fun record(event: TraceEvent) { traces += event } },
+        )
+        rSim.idle(); rSim.armSimulation(); rSim.send("hello")
+        val simulated = rSim.idle()
+        scope2.cancel()
+
+        assertEquals(0, sim.calls.get()) // the simulation replaced the first attempt only; no real Gemini call
+        assertEquals(2, realB.calls.get()) // Groq really answered both runs
+        assertEquals(real.conversation.messages.map { it.text }, simulated.conversation.messages.map { it.text })
+        assertEquals(real.temporaryProvider, simulated.temporaryProvider)
+        assertEquals(real.dispatch!!.adapter, simulated.dispatch!!.adapter) // retry went to the Groq adapter both times
+        assertEquals(R.label, simulated.conversation.messages.last().provider)
+        assertEquals(realTrace.map { it.first }, traces.map { it.stage }) // same decision and attempt events
+        assertTrue(ledger2.isExhausted(G)) // and it was recorded as exhausted just like a real error
+    }
+
+    @Test fun simulatedFirstAttemptIsShownAsSimulatedAndRetryAsConfirmedGroq() = runBlocking {
+        val a = GeminiFake { emit("x") }
+        val b = GroqFake { delay(300); emit("groq answer") }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G), countdown = 1)
+        r.idle(); r.armSimulation(); r.send("hello")
+        val first = r.until { it.dispatch?.simulated == true }.dispatch!!
+        assertEquals("SimulatedQuotaProvider", first.adapter)
+        assertFalse(first.mismatch)
+        val second = r.until { it.dispatch?.adapter == "GroqFake" }.dispatch!!
+        assertFalse(second.simulated)
+        assertEquals(G, second.requested)
+        r.idle()
+    }
+
+    // ------------------------------------------------------------------ trace content
+
+    @Test fun traceRecordsDecisionAndAttemptWithoutAnySecretOrChatText() = runBlocking {
+        val a = GeminiFake { throw quota() }
+        val b = GroqFake { emit("secret reply text") }
+        val r = runner(FakeSource(mapOf(G to a, R to b), preferred = G))
+        r.idle(); r.send("my private question")
+        r.idle()
+        val decision = traces.first { it.stage.startsWith("decision") }
+        assertEquals(G, decision.originalProvider)
+        assertEquals("model-${G.name}", decision.originalModel)
+        assertEquals("QuotaExhausted", decision.classification)
+        assertEquals(R, decision.fallbackProvider)
+        assertEquals("model-${R.name}", decision.fallbackModel)
+        val attempt = traces.first { it.stage == "attempt finished" }
+        assertEquals("GroqFake", attempt.adapter)
+        assertTrue(attempt.streamStarted)
+        assertTrue(attempt.responseReceived)
+        assertEquals("success", attempt.result)
+        val all = traces.joinToString { it.toString() }
+        assertFalse(all.contains("KEY"))
+        assertFalse(all.contains("private question"))
+        assertFalse(all.contains("secret reply"))
     }
 }
