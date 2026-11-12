@@ -99,7 +99,18 @@ data class JarvisSettings(
     val groqModel: String = AiProvider.GROQ.defaultModel,
     /** Providers whose cloud/privacy warning the user has read and accepted. */
     val acknowledged: Set<AiProvider> = emptySet(),
+    /** When a provider's quota is really used up, offer to switch to another one (with a countdown and Cancel). */
+    val failoverEnabled: Boolean = true,
+    /** Order in which other providers are tried as failover targets. [provider] is the preferred one. */
+    val providerOrder: List<AiProvider> = AiProvider.entries,
+    /** Providers the user does not want used as failover targets. */
+    val disabledProviders: Set<AiProvider> = emptySet(),
 ) {
+    /** Every provider exactly once, in the user's order (new providers added later land at the end). */
+    fun orderedProviders(): List<AiProvider> = (providerOrder + AiProvider.entries).distinct()
+
+    fun modelOf(p: AiProvider): String = modelFor(p).trim().ifBlank { p.defaultModel }
+
     fun modelFor(p: AiProvider): String = if (p == AiProvider.GEMINI) geminiModel else groqModel
 
     fun withModel(p: AiProvider, model: String): JarvisSettings =

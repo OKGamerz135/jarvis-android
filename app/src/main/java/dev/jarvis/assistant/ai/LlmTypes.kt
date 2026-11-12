@@ -50,6 +50,9 @@ interface ProviderDiagnostics {
     suspend fun generateOnce(request: ChatRequest): String
 }
 
+/** How we know when a quota resets. REPORTED = in the provider's reply; DOCUMENTED = in its published docs only. */
+enum class ResetSource { REPORTED, DOCUMENTED, UNKNOWN, SIMULATED }
+
 sealed interface LlmError {
     data object NoKey : LlmError
     data object NotAcknowledged : LlmError
@@ -61,7 +64,12 @@ sealed interface LlmError {
     data class RateLimited(val retryAfterSeconds: Long?) : LlmError
 
     /** A genuine quota (for example the daily one) is used up. Retrying soon will not help. */
-    data class QuotaExhausted(val resetAt: Instant?, val quotaId: String?) : LlmError
+    data class QuotaExhausted(
+        val resetAt: Instant?,
+        val quotaId: String?,
+        /** Where [resetAt] came from. Never guessed: if nobody said, it is [ResetSource.UNKNOWN] and resetAt is null. */
+        val resetSource: ResetSource = ResetSource.UNKNOWN,
+    ) : LlmError
 
     /** The provider said "too many requests" without saying which limit. Treated as ordinary, not exhausted. */
     data class Unclear429(val retryAfterSeconds: Long?) : LlmError

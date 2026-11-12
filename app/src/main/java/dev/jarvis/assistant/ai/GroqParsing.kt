@@ -133,7 +133,11 @@ object GroqParsing {
         val daily = "per day" in lower || "(rpd)" in lower || "(tpd)" in lower
         val perMinute = "per minute" in lower || "(rpm)" in lower || "(tpm)" in lower
         return when {
-            daily -> LlmError.QuotaExhausted(retry?.let { now.plusSeconds(it) }, quotaName(lower))
+            daily -> LlmError.QuotaExhausted(
+                retry?.let { now.plusSeconds(it) },
+                quotaName(lower),
+                if (retry != null) ResetSource.REPORTED else ResetSource.UNKNOWN,
+            )
             perMinute -> LlmError.RateLimited(retry)
             else -> LlmError.Unclear429(retry)
         }

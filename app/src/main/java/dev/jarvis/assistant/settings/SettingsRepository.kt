@@ -2,6 +2,7 @@ package dev.jarvis.assistant.settings
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -39,6 +40,12 @@ class SettingsRepository(context: Context) {
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GROQ_MODEL = stringPreferencesKey("groq_model")
         val ACKNOWLEDGED = stringSetPreferencesKey("acknowledged_providers")
+        val FAILOVER = booleanPreferencesKey("failover_enabled")
+        val ORDER = stringPreferencesKey("provider_order")
+        val DISABLED = stringSetPreferencesKey("disabled_providers")
+
+        fun providersFrom(names: Collection<String>): List<AiProvider> =
+            names.mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
             enumValues<E>().firstOrNull { it.name == name } ?: default
@@ -59,6 +66,9 @@ class SettingsRepository(context: Context) {
                 acknowledged = (this[ACKNOWLEDGED] ?: emptySet())
                     .mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
                     .toSet(),
+                failoverEnabled = this[FAILOVER] ?: d.failoverEnabled,
+                providerOrder = this[ORDER]?.split(",")?.let { providersFrom(it) }?.ifEmpty { null } ?: d.providerOrder,
+                disabledProviders = providersFrom(this[DISABLED] ?: emptySet()).toSet(),
             )
         }
 
@@ -74,6 +84,9 @@ class SettingsRepository(context: Context) {
             this[GEMINI_MODEL] = s.geminiModel
             this[GROQ_MODEL] = s.groqModel
             this[ACKNOWLEDGED] = s.acknowledged.map { it.name }.toSet()
+            this[FAILOVER] = s.failoverEnabled
+            this[ORDER] = s.providerOrder.joinToString(",") { it.name }
+            this[DISABLED] = s.disabledProviders.map { it.name }.toSet()
         }
     }
 }

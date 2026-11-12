@@ -79,10 +79,10 @@ fun SettingsHubScreen(
             onClick = onOpenPersonalIntelligence,
         )
         NavCard(
-            title = "AI provider and key",
+            title = "AI providers",
             subtitle = if (s == null) "" else {
                 val saved = if (keys[s.provider] == true) "key saved" else "no key yet"
-                "${s.provider.label}, $saved"
+                "Preferred: ${s.provider.label}, $saved. Failover ${if (s.failoverEnabled) "on" else "off"}"
             },
             onClick = onOpenProvider,
         )
@@ -218,6 +218,7 @@ private fun PersonalIntelligenceContent(s: JarvisSettings, vm: SettingsViewModel
 
 @Composable
 fun ProviderScreen(
+    editing: AiProvider? = null,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
     testVm: ConnectionTestViewModel = viewModel(),
@@ -229,7 +230,7 @@ fun ProviderScreen(
     if (current == null) {
         Loading(modifier)
     } else {
-        ProviderContent(current, keys, notice, vm, testVm, modifier)
+        ProviderContent(current, keys, notice, vm, testVm, editing ?: current.provider, modifier)
     }
 }
 
@@ -240,9 +241,9 @@ private fun ProviderContent(
     notice: String?,
     vm: SettingsViewModel,
     testVm: ConnectionTestViewModel,
+    provider: AiProvider,
     modifier: Modifier,
 ) {
-    val provider = s.provider
     val acknowledged = provider in s.acknowledged
     val hasKey = keys[provider] == true
 
@@ -250,15 +251,15 @@ private fun ProviderContent(
         SectionTitle("Which AI answers you")
         AiProvider.entries.forEach { p ->
             RadioRow(
-                selected = provider == p,
+                selected = s.provider == p,
                 title = p.label,
                 subtitle = if (keys[p] == true) "Key saved" else "No key yet",
                 onClick = { vm.update { it.copy(provider = p) } },
             )
         }
         Text(
-            "JARVIS never switches provider by itself and never uses a paid service. " +
-                "If the free quota runs out you'll see a message, and you choose what happens next.",
+            "JARVIS never uses a paid service. If a provider's quota is genuinely used up, automatic failover " +
+                "(Settings > AI providers) can switch to another ready provider after a 5-second countdown you can cancel.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -6,22 +6,47 @@ import dev.jarvis.assistant.ai.ErrorMessages
 import dev.jarvis.assistant.ai.FailureFormatter
 import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmProvider
+import dev.jarvis.assistant.ai.ResetFormat
+import dev.jarvis.assistant.ai.ResetSource
+import dev.jarvis.assistant.providers.QuotaLedger
+import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** What went wrong, in words the screen can show. [needsSetup] adds an "Open provider settings" button. */
 data class ChatProblem(val message: String, val details: String?, val needsSetup: Boolean)
+
+/** The five-second "switching provider" announcement. Shown with a Cancel button. */
+data class FailoverOffer(
+    val from: AiProvider,
+    val to: AiProvider,
+    val toModel: String,
+    val secondsLeft: Int,
+    /** When the provider we're leaving should be back, in plain words, or that it's unknown. */
+    val resetNote: String,
+) {
+    val announcement: String
+        get() = "Your current AI provider has exhausted its available quota. Switching to ${to.label} in $secondsLeft seconds."
+    val disclosure: String
+        get() = "This conversation so far will be sent to ${to.label} (model $toModel). Your API keys never leave their own provider."
+}
 
 data class ChatUiState(
     val loaded: Boolean = false,
@@ -37,6 +62,16 @@ data class ChatUiState(
     /** Shown when a send was refused because a reply was still being generated. Never sent later. */
     val rejection: String? = null,
     val history: List<ConversationSummary> = emptyList(),
+    /** Non-null during the countdown before switching provider. */
+    val failover: FailoverOffer? = null,
+    /** The provider in use after an automatic switch. Null means the preferred provider is in use. */
+    val temporaryProvider: AiProvider? = null,
+    /** The preferred provider that [temporaryProvider] replaced. */
+    val preferredProvider: AiProvider? = null,
+    /** Set when the preferred provider is available again; the screen asks whether to switch back. */
+    val recoveryOffer: AiProvider? = null,
+    /** True after "simulate quota exhaustion" was armed for the next message. */
+    val simulationArmed: Boolean = false,
 )
 
 enum class SendResult { ACCEPTED, EMPTY, BUSY }
@@ -56,22 +91,33 @@ class SendGate {
 }
 
 /**
- * Owns the chat state and the rule that only one generation may run. Everything the screen can do goes through
- * here, so the Send button and the keyboard's Send action are protected by the same lock. Android-free, so it is
- * unit-tested.
+ * Owns the chat state, the rule that only one generation may run, and automatic provider failover.
+ * Everything the screen can do goes through here. Android-free, so it is unit-tested.
  */
 class ChatRunner(
     private val storage: ChatStorage,
     private val engine: ChatEngine,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
-    private val resolve: suspend () -> Resolved,
+    private val source: ProviderSource,
+    private val ledger: QuotaLedger,
+    private val network: NetworkWatcher = NoNetworkWait,
     private val maxRetries: Int = 2,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = { System.currentTimeMillis() },
+    private val countdownSeconds: Int = 5,
+    private val tickMs: Long = 1000,
+    private val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     private val gate = SendGate()
     private var job: Job? = null
+    private var failoverCancel: CompletableDeferred<Unit>? = null
+    private var stoppedDuringFailover = false
+    private var failingProvider: AiProvider? = null
+    private var recoveryDeclinedFor: AiProvider? = null
+    private var recoveryTimer: Job? = null
+    private val simulateNext = AtomicBoolean(false)
+    private val visible = MutableStateFlow(true)
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -124,7 +170,8 @@ class ChatRunner(
 
     /**
      * The single entry point for sending, used by the button and by the keyboard's Send action.
-     * BUSY means a reply is still being generated: the message is refused, not queued, and never sent later.
+     * BUSY means a reply is still being generated (or a provider switch is counting down): the message is refused,
+     * not queued, and never sent later.
      */
     fun send(text: String): SendResult {
         val clean = text.trim()
@@ -151,10 +198,12 @@ class ChatRunner(
     }
 
     private fun begin() {
-        _state.update { it.copy(generating = true, stopping = false, problem = null, note = null, rejection = null) }
+        // Sending a message while the "switch back?" question is showing counts as "stay for now".
+        _state.value.recoveryOffer?.let { recoveryDeclinedFor = it }
+        _state.update { it.copy(generating = true, stopping = false, problem = null, note = null, rejection = null, recoveryOffer = null) }
     }
 
-    /** Cancels the running request right now. The UI reacts at once; the request is closed by the adapters. */
+    /** Cancels the running request (or countdown) right now. */
     fun stop() {
         val j = job ?: return
         if (!gate.isBusy) return
@@ -170,13 +219,73 @@ class ChatRunner(
         _state.update { it.copy(rejection = null) }
     }
 
+    // ------------------------------------------------------------------ failover controls
+
+    /** The Cancel button on the countdown. */
+    fun cancelFailover() {
+        failoverCancel?.complete(Unit)
+    }
+
+    /** The app tells us whether it's on screen. The countdown only counts down while it is. */
+    fun setVisible(isVisible: Boolean) {
+        visible.value = isVisible
+    }
+
+    /** Arms a fake "quota exhausted" for the next request. Nothing is sent to any provider. */
+    fun armSimulation() {
+        simulateNext.set(true)
+        _state.update { it.copy(simulationArmed = true) }
+    }
+
+    /** Switch back to the preferred provider after it recovered. */
+    fun acceptRecovery() {
+        val back = _state.value.recoveryOffer ?: _state.value.preferredProvider
+        if (back != null) ledger.clear(back)
+        recoveryDeclinedFor = null
+        _state.update { it.copy(temporaryProvider = null, preferredProvider = null, recoveryOffer = null) }
+    }
+
+    /** Stay on the temporary provider and stop asking about this recovery. */
+    fun declineRecovery() {
+        recoveryDeclinedFor = _state.value.recoveryOffer
+        _state.update { it.copy(recoveryOffer = null) }
+    }
+
+    /**
+     * Offers to switch back when the preferred provider is no longer known to be used up. Called after each
+     * answer, when the app comes back to the screen, and when a known reset time passes. Never while a reply is
+     * being generated, and only ever as a question.
+     */
+    fun checkRecovery() {
+        scope.launch {
+            val s = _state.value
+            val preferred = s.preferredProvider ?: return@launch
+            if (s.temporaryProvider == null || gate.isBusy || s.generating) return@launch
+            if (ledger.isExhausted(preferred) || recoveryDeclinedFor == preferred) return@launch
+            _state.update { it.copy(recoveryOffer = preferred) }
+        }
+    }
+
+    private fun scheduleRecoveryCheck(provider: AiProvider) {
+        recoveryTimer?.cancel()
+        val until = ledger.record(provider)?.exhaustedUntil ?: return // unknown reset: nothing to wait for
+        val wait = (until - clock()).coerceAtLeast(0) + 500
+        recoveryTimer = scope.launch {
+            delay(wait)
+            checkRecovery()
+        }
+    }
+
+    // ------------------------------------------------------------------ the generation loop
+
     private fun launchGeneration(userText: String?) {
         val j = scope.launch { runGeneration(userText) }
         job = j
         // Runs however the job ends, even if it was cancelled before it started: the lock can never get stuck.
         j.invokeOnCompletion {
-            _state.update { it.copy(generating = false, stopping = false, streaming = null, note = null) }
+            _state.update { it.copy(generating = false, stopping = false, streaming = null, note = null, failover = null) }
             gate.release()
+            checkRecovery() // after the lock is free, so the question never appears mid-answer
         }
     }
 
@@ -186,62 +295,228 @@ class ChatRunner(
                 val withUser = withContext(io) { engine.addUserMessage(_state.value.conversation, userText) }
                 _state.update { it.copy(conversation = withUser) }
             }
-            when (val r = resolve()) {
-                is Resolved.Stop -> _state.update { it.copy(problem = r.problem) }
-                is Resolved.Ready -> generate(r)
-            }
+            loop()
             refreshHistory()
         } catch (e: CancellationException) {
-            withContext(NonCancellable) {
-                // The engine already saved any partial reply. Reload so the screen shows it, marked interrupted.
-                val saved = withContext(io) { storage.load(_state.value.conversation.id) }
-                val kept = saved?.messages?.lastOrNull()?.let { it.interrupted } == true
-                _state.update {
-                    it.copy(
-                        conversation = saved ?: it.conversation,
-                        problem = ChatProblem(
-                            if (kept) "Response interrupted. The text received so far was kept."
-                            else "Response interrupted before any text arrived.",
-                            null,
-                            needsSetup = false,
-                        ),
-                    )
-                }
-                refreshHistory()
-            }
+            withContext(NonCancellable) { onCancelled() }
         } catch (e: Exception) {
             _state.update { it.copy(problem = ChatProblem("Unexpected error: ${e.javaClass.simpleName}", null, false)) }
         }
     }
 
-    private suspend fun generate(r: Resolved.Ready) {
+    private suspend fun onCancelled() {
+        val saved = withContext(io) { storage.load(_state.value.conversation.id) }
+        if (stoppedDuringFailover) {
+            stoppedDuringFailover = false
+            val from = failingProvider
+            _state.update {
+                it.copy(
+                    conversation = saved ?: it.conversation,
+                    problem = ChatProblem(
+                        "Switch cancelled. I stayed with ${from?.label ?: "the current provider"}, so I can't answer " +
+                            "until you pick another provider or its quota resets.",
+                        null,
+                        needsSetup = true,
+                    ),
+                )
+            }
+        } else {
+            val kept = saved?.messages?.lastOrNull()?.interrupted == true
+            _state.update {
+                it.copy(
+                    conversation = saved ?: it.conversation,
+                    problem = ChatProblem(
+                        if (kept) "Response interrupted. The text received so far was kept."
+                        else "Response interrupted before any text arrived.",
+                        null,
+                        needsSetup = false,
+                    ),
+                )
+            }
+        }
+        refreshHistory()
+    }
+
+    /** Tries providers until one answers or we run out of sensible options. Never re-adds the user's message. */
+    private suspend fun loop() {
+        var provider: AiProvider? = _state.value.temporaryProvider
+        val tried = LinkedHashSet<AiProvider>()
+        var waitedRate = false
+        var waitedNet = false
+
+        while (true) {
+            val ready = when (val r = source.resolve(provider)) {
+                is Resolved.Stop -> {
+                    _state.update { it.copy(problem = r.problem) }
+                    return
+                }
+                is Resolved.Ready -> r
+            }
+            val current = ready.target.provider
+            tried += current
+            val snap = source.snapshot()
+
+            // If we already know this provider is used up, say so now instead of spending a request to find out.
+            val known = ledger.record(current)
+            val knownExhausted = snap.failoverEnabled && known != null && ledger.isExhausted(current)
+            val failure: GenResult.Failure = if (knownExhausted) {
+                GenResult.Failure(
+                    _state.value.conversation,
+                    LlmError.QuotaExhausted(known!!.exhaustedUntil?.let { Instant.ofEpochMilli(it) }, known.quotaId, known.source),
+                    null,
+                )
+            } else {
+                val llm: LlmProvider = if (simulateNext.getAndSet(false)) {
+                    _state.update { it.copy(simulationArmed = false) }
+                    SimulatedQuotaProvider(Instant.ofEpochMilli(clock()))
+                } else {
+                    ready.llm
+                }
+                when (val result = generate(ready, llm)) {
+                    is GenResult.Success -> {
+                        ledger.clear(current) // it just worked, so whatever we remembered is out of date
+                        _state.update { it.copy(conversation = result.conversation) }
+                        return
+                    }
+                    is GenResult.Failure -> result
+                }
+            }
+
+            _state.update { it.copy(conversation = failure.conversation) }
+            val error = failure.error
+            if (error is LlmError.QuotaExhausted && !knownExhausted) {
+                ledger.markExhausted(current, error)
+            }
+
+            val ctx = FailoverContext(
+                current = current,
+                failoverEnabled = snap.failoverEnabled,
+                candidates = snap.candidates,
+                partialStarted = failure.partial,
+                alreadyWaitedForRateLimit = waitedRate,
+                alreadyWaitedForNetwork = waitedNet,
+                alreadyTried = tried,
+            )
+            when (val d = FailoverPolicy.decide(error, ctx)) {
+                is Decision.Switch -> {
+                    val note = resetNote(current)
+                    if (!countdown(current, d.to, note)) {
+                        _state.update { it.copy(problem = cancelledProblem(current)) }
+                        return
+                    }
+                    provider = d.to.provider
+                    _state.update {
+                        it.copy(
+                            temporaryProvider = d.to.provider,
+                            preferredProvider = it.preferredProvider ?: snap.preferred,
+                            recoveryOffer = null,
+                        )
+                    }
+                    recoveryDeclinedFor = null
+                    scheduleRecoveryCheck(snap.preferred)
+                }
+                is Decision.WaitRateLimit -> {
+                    waitedRate = true
+                    for (s in d.seconds downTo 1) {
+                        _state.update { it.copy(note = "Rate limit reached. Retrying once in $s s...") }
+                        delay(tickMs)
+                    }
+                }
+                Decision.WaitForNetwork -> {
+                    waitedNet = true
+                    _state.update { it.copy(note = "You're offline. Your message is saved. Waiting for a connection...") }
+                    network.awaitConnected()
+                    delay(tickMs) // let the connection settle before the one retry
+                }
+                Decision.FailoverOff -> {
+                    _state.update {
+                        it.copy(problem = ChatProblem(
+                            ErrorMessages.of(error!!) + " Automatic provider failover is off, so I stayed with ${current.label}.",
+                            FailureFormatter.details(failure.exception?.context),
+                            needsSetup = true,
+                        ))
+                    }
+                    return
+                }
+                is Decision.NoAlternative -> {
+                    val why = d.reasons.joinToString("; ") { (p, r) -> "${p.label}: $r" }
+                    _state.update {
+                        it.copy(problem = ChatProblem(
+                            ErrorMessages.of(error!!) + " No other provider is ready" + (if (why.isEmpty()) "." else " ($why).") +
+                                " Set one up under AI providers.",
+                            FailureFormatter.details(failure.exception?.context),
+                            needsSetup = true,
+                        ))
+                    }
+                    return
+                }
+                Decision.ShowError -> {
+                    val message = error?.let { ErrorMessages.of(it) } ?: "Something went wrong."
+                    val setup = error is LlmError.InvalidKey || error is LlmError.ModelNotFound
+                    _state.update {
+                        it.copy(problem = ChatProblem(message, FailureFormatter.details(failure.exception?.context), setup))
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private fun resetNote(provider: AiProvider): String {
+        val r = ledger.record(provider) ?: return "reset time unknown"
+        val until = r.exhaustedUntil ?: return "reset time unknown"
+        val when_ = ResetFormat.describe(Instant.ofEpochMilli(until), Instant.ofEpochMilli(clock()), zone)
+        return when (r.source) {
+            ResetSource.REPORTED -> "resets $when_ (reported by the provider)"
+            ResetSource.DOCUMENTED -> "resets $when_ (per its documentation, not reported in the error)"
+            ResetSource.SIMULATED -> "simulated test"
+            ResetSource.UNKNOWN -> "reset time unknown"
+        }
+    }
+
+    private fun cancelledProblem(from: AiProvider) = ChatProblem(
+        "Switch cancelled. I stayed with ${from.label}, which has used its quota, so I can't answer until you pick " +
+            "another provider or its quota resets.",
+        null,
+        needsSetup = true,
+    )
+
+    /** The five-second announcement. Returns false if the user cancelled. Pauses while the app is off screen. */
+    private suspend fun countdown(from: AiProvider, to: Candidate, resetNote: String): Boolean {
+        val cancel = CompletableDeferred<Unit>()
+        failoverCancel = cancel
+        failingProvider = from
+        try {
+            for (s in countdownSeconds downTo 1) {
+                _state.update { it.copy(failover = FailoverOffer(from, to.provider, to.model, s, resetNote)) }
+                visible.first { it } // never switch while the user can't see the announcement
+                if (withTimeoutOrNull(tickMs) { cancel.await() } != null) return false
+            }
+            return true
+        } catch (e: CancellationException) {
+            stoppedDuringFailover = true
+            throw e
+        } finally {
+            failoverCancel = null
+            _state.update { it.copy(failover = null) }
+        }
+    }
+
+    private suspend fun generate(r: Resolved.Ready, llm: LlmProvider): GenResult {
         val label = r.target.providerLabel
         val events = object : CallEvents {
             override fun onRetry(retryNumber: Int, maxRetries: Int, waitMs: Long) {
                 _state.update { it.copy(note = "$label is overloaded. Retrying $retryNumber of $maxRetries in ${(waitMs + 500) / 1000} s...") }
             }
         }
-        val result = withContext(io) {
+        return withContext(io) {
             engine.generate(
                 conv = _state.value.conversation,
                 target = r.target,
-                llm = r.llm,
+                llm = llm,
                 options = CallOptions(maxRetries, events),
                 onPartial = { text -> _state.update { it.copy(streaming = text, note = null) } },
             )
-        }
-        when (result) {
-            is GenResult.Success -> _state.update { it.copy(conversation = result.conversation) }
-            is GenResult.Failure -> {
-                val message = result.error?.let { ErrorMessages.of(it) } ?: "Something went wrong."
-                val setup = result.error is LlmError.InvalidKey || result.error is LlmError.ModelNotFound
-                _state.update {
-                    it.copy(
-                        conversation = result.conversation,
-                        problem = ChatProblem(message, FailureFormatter.details(result.exception?.context), setup),
-                    )
-                }
-            }
         }
     }
 

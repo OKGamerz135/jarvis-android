@@ -6,6 +6,7 @@ import dev.jarvis.assistant.ai.ChatRole
 import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmException
 import dev.jarvis.assistant.ai.LlmProvider
+import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -15,12 +16,14 @@ import java.util.UUID
 
 /** Everything needed to make one request, already checked for key and consent. */
 class ChatTarget(
-    val providerLabel: String,
+    val provider: AiProvider,
     val historyBudgetChars: Int,
     val model: String,
     val apiKey: String,
     val systemPrompt: String,
-)
+) {
+    val providerLabel: String get() = provider.label
+}
 
 sealed interface GenResult {
     val conversation: Conversation
@@ -28,7 +31,13 @@ sealed interface GenResult {
     data class Success(override val conversation: Conversation) : GenResult
 
     /** [error] is null only for a failure that isn't an LlmError. The conversation may hold a partial reply. */
-    data class Failure(override val conversation: Conversation, val error: LlmError?, val exception: LlmException?) : GenResult
+    data class Failure(
+        override val conversation: Conversation,
+        val error: LlmError?,
+        val exception: LlmException?,
+        /** True when some reply text had already arrived (and was saved as an interrupted reply). */
+        val partial: Boolean = false,
+    ) : GenResult
 }
 
 class ChatEngine(
@@ -70,7 +79,8 @@ class ChatEngine(
             withContext(NonCancellable) { savePartial(conv, target, reply.toString()) }
             throw e
         } catch (e: LlmException) {
-            return GenResult.Failure(savePartial(conv, target, reply.toString()), e.error, e)
+            val saved = savePartial(conv, target, reply.toString())
+            return GenResult.Failure(saved, e.error, e, partial = saved.messages.size > conv.messages.size)
         }
         val text = reply.toString()
         if (text.isBlank()) {

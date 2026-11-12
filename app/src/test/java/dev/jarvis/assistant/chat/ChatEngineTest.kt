@@ -23,7 +23,7 @@ class ChatEngineTest {
     private val storage = FileChatStorage(Files.createTempDirectory("engine").toFile())
     private var counter = 0
     private val engine = ChatEngine(storage, clock = { 1000L + counter }, newId = { "id${counter++}" })
-    private val target = ChatTarget("Groq", 10_000, "model-x", "KEY", "system")
+    private val target = ChatTarget(dev.jarvis.assistant.settings.AiProvider.GROQ, 10_000, "model-x", "KEY", "system")
 
     private class Fake(val block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(ChatRequest) -> Unit) : LlmProvider {
         var lastRequest: ChatRequest? = null
@@ -114,7 +114,7 @@ class ChatEngineTest {
     fun theWholeHistoryIsSentWithinBudgetOldestTrimmed() = runBlocking {
         var conv = start()
         val llm = Fake { emit("r") }
-        val small = ChatTarget("Groq", 60, "m", "K", "s")
+        val small = ChatTarget(dev.jarvis.assistant.settings.AiProvider.GROQ, 60, "m", "K", "s")
         repeat(4) {
             conv = (engine.generate(conv, small, llm, CallOptions()) {} as GenResult.Success).conversation
             conv = engine.addUserMessage(conv, "next question number $it with some padding")

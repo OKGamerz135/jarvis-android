@@ -39,7 +39,9 @@ import dev.jarvis.assistant.ui.chat.ChatScreen
 import dev.jarvis.assistant.ui.chat.HistoryScreen
 import dev.jarvis.assistant.ui.settings.DiagnosticsScreen
 import dev.jarvis.assistant.ui.settings.PersonalIntelligenceScreen
+import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.ui.settings.ProviderScreen
+import dev.jarvis.assistant.ui.settings.ProvidersScreen
 import dev.jarvis.assistant.ui.settings.SettingsHubScreen
 import dev.jarvis.assistant.ui.theme.JarvisTheme
 
@@ -61,7 +63,8 @@ private enum class Screen(val title: String, val parent: Screen?) {
     History("Chats", Home),
     Settings("Settings", Home),
     PersonalIntelligence("Personal Intelligence", Settings),
-    Provider("AI provider and key", Settings),
+    Providers("AI providers", Settings),
+    Provider("Key and model", Providers),
     Diagnostics("Diagnostics log", Settings),
 }
 
@@ -70,6 +73,7 @@ private enum class Screen(val title: String, val parent: Screen?) {
 private fun JarvisApp() {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
     val chatVm: ChatViewModel = viewModel()
+    var editing by rememberSaveable { mutableStateOf<String?>(null) }
     val parent = screen.parent
     BackHandler(enabled = parent != null) { if (parent != null) screen = parent }
 
@@ -101,16 +105,24 @@ private fun JarvisApp() {
     ) { padding ->
         val modifier = Modifier.padding(padding).consumeWindowInsets(padding)
         when (screen) {
-            Screen.Home -> ChatScreen(onOpenProvider = { screen = Screen.Provider }, vm = chatVm, modifier = modifier)
+            Screen.Home -> ChatScreen(onOpenProvider = { screen = Screen.Providers }, vm = chatVm, modifier = modifier)
             Screen.History -> HistoryScreen(vm = chatVm, onOpened = { screen = Screen.Home }, modifier = modifier)
             Screen.Settings -> SettingsHubScreen(
                 onOpenPersonalIntelligence = { screen = Screen.PersonalIntelligence },
-                onOpenProvider = { screen = Screen.Provider },
+                onOpenProvider = { screen = Screen.Providers },
                 onOpenDiagnostics = { screen = Screen.Diagnostics },
                 modifier = modifier,
             )
             Screen.PersonalIntelligence -> PersonalIntelligenceScreen(modifier)
-            Screen.Provider -> ProviderScreen(modifier)
+            Screen.Providers -> ProvidersScreen(
+                onConfigure = { editing = it.name; screen = Screen.Provider },
+                modifier = modifier,
+                chatVm = chatVm,
+            )
+            Screen.Provider -> ProviderScreen(
+                editing = AiProvider.entries.firstOrNull { it.name == editing },
+                modifier = modifier,
+            )
             Screen.Diagnostics -> DiagnosticsScreen(modifier)
         }
     }

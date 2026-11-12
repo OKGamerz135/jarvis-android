@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.jarvis.assistant.ai.ChatRole
 import dev.jarvis.assistant.chat.ChatProblem
@@ -56,6 +57,13 @@ fun ChatScreen(
     val ui by vm.state.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // The failover countdown only runs while the app is on screen, so a switch is never silent.
+    LifecycleStartEffect(Unit) {
+        vm.setVisible(true)
+        vm.checkRecovery()
+        onStopOrDispose { vm.setVisible(false) }
+    }
     val messages = ui.conversation.messages
     val streaming = ui.streaming
 
@@ -85,6 +93,45 @@ fun ChatScreen(
                         item(key = "live") { LiveBubble(streaming, ui.note) }
                     }
                     items(messages.asReversed(), key = { it.id }) { Bubble(it) }
+                }
+            }
+        }
+
+        ui.failover?.let { f ->
+            Card(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(f.announcement, style = MaterialTheme.typography.titleSmall)
+                    Text(f.disclosure, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "${f.from.label}: ${f.resetNote}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = vm::cancelFailover) { Text("Cancel") }
+                }
+            }
+        }
+
+        val temp = ui.temporaryProvider
+        if (temp != null && !ui.generating) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val offer = ui.recoveryOffer
+                Text(
+                    if (offer != null) "${offer.label} should be available again. Switch back to it?"
+                    else "Temporarily using ${temp.label} (${ui.preferredProvider?.label ?: "your preferred provider"} used up its quota).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (offer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (offer != null) {
+                    TextButton(onClick = vm::acceptRecovery) { Text("Switch back") }
+                    TextButton(onClick = vm::declineRecovery) { Text("Stay") }
                 }
             }
         }
@@ -251,7 +298,7 @@ private fun ProblemBanner(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (canRetry) Button(onClick = onRetry) { Text("Retry") }
-                if (problem.needsSetup) OutlinedButton(onClick = onOpenProvider) { Text("Open provider settings") }
+                if (problem.needsSetup) OutlinedButton(onClick = onOpenProvider) { Text("Open AI providers") }
                 TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
         }

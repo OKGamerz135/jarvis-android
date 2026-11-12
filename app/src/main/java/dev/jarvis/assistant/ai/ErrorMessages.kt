@@ -41,8 +41,13 @@ object ErrorMessages {
             "The provider says the model \"${error.model}\" doesn't exist for your key. Model names change, so edit it in AI provider settings."
         is LlmError.RateLimited ->
             "Too many requests for a moment. Try again in ${error.retryAfterSeconds?.let { "$it seconds" } ?: "a few seconds"}."
-        is LlmError.QuotaExhausted ->
-            "The free quota for this provider is used up. It should reset ${ResetFormat.describe(error.resetAt, now, zone)}."
+        is LlmError.QuotaExhausted -> "The free quota for this provider is used up. " + when (error.resetSource) {
+            ResetSource.REPORTED -> "The provider says it resets ${ResetFormat.describe(error.resetAt, now, zone)}."
+            ResetSource.DOCUMENTED ->
+                "Per the provider's documentation it resets ${ResetFormat.describe(error.resetAt, now, zone)} (the error itself doesn't say)."
+            ResetSource.SIMULATED -> "(Simulated test, nothing was sent.)"
+            ResetSource.UNKNOWN -> "The reset time is unknown."
+        }
         is LlmError.Unclear429 ->
             "The provider says you've hit a limit but not which one. Wait a little and try again."
         is LlmError.Overloaded ->

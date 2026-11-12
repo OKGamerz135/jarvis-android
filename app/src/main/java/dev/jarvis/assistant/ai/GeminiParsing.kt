@@ -159,7 +159,7 @@ object GeminiParsing {
         }
         val daily = quotaIds.firstOrNull { it.lowercase().let { id -> "perday" in id || "daily" in id } }
         return when {
-            daily != null -> LlmError.QuotaExhausted(nextMidnightPacific(now), daily)
+            daily != null -> LlmError.QuotaExhausted(nextMidnightPacific(now), daily, ResetSource.DOCUMENTED)
             quotaIds.any { "perminute" in it.lowercase() } -> LlmError.RateLimited(retry)
             else -> LlmError.Unclear429(retry)
         }

@@ -37,10 +37,10 @@ class ChatRunnerTest {
     @After
     fun tearDown() = scope.cancel()
 
-    private val target = ChatTarget("Groq", 10_000, "m", "KEY", "system")
+    private val target = ChatTarget(dev.jarvis.assistant.settings.AiProvider.GROQ, 10_000, "m", "KEY", "system")
 
     private fun runner(llm: LlmProvider) =
-        ChatRunner(storage, ChatEngine(storage), scope, Dispatchers.IO, { Resolved.Ready(target, llm) })
+        ChatRunner(storage, ChatEngine(storage), scope, Dispatchers.IO, FakeSource(mapOf(target.provider to llm)), newLedger(), tickMs = 5)
 
     /** A provider whose reply is controlled by the test. */
     private fun provider(block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) = object : LlmProvider {
