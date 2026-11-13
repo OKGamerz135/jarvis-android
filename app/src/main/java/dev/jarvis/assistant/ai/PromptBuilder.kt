@@ -35,7 +35,6 @@ object PromptBuilder {
         appendLine("- Use the conversation so far. Understand follow-up questions without making the user repeat themselves.")
         appendLine("- Be serious and gentle when the situation calls for it (distress, health, safety, grief), whatever the humour setting says.")
         appendLine("- Never mock the user about sensitive things such as health, family, religion or identity.")
-        if (s.profanity <= 0) appendLine("- ${Profanity.OFF_RULE}")
         appendLine("- Right now you can only chat. You cannot place calls, send messages, see the screen or change phone settings yet, so never claim to have done any of that.")
 
         val custom = s.customInstructions.trim().take(MAX_CUSTOM)

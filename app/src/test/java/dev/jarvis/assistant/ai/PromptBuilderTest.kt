@@ -89,7 +89,7 @@ class PromptBuilderTest {
         assertTrue(p.contains("Never use profanity"))
         assertTrue(p.contains("not even if the user swears or asks you to"))
         assertFalse(p.contains("emotional context"))
-        assertEquals(2, Regex("Profanity and insults: OFF").findAll(p).count() + 1) // once in the level line, once in the rules list
+        assertEquals(1, Regex("Profanity and insults: OFF").findAll(p).count())
     }
 
     @Test

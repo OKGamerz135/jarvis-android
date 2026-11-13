@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -91,27 +92,42 @@ class CloudflareProvider(
 
     // ------------------------------------------------------------------ streaming generation
 
-    override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow {
-        val creds = credentialsOrThrow(request.apiKey, request.model)
-        var emitted = false
-        var attempt = 0
-        while (true) {
-            attempt++
-            try {
-                streamOnce(request, creds, attempt) { chunk ->
-                    emitted = true
-                    emit(chunk)
+    /** See [OpenRouterProvider]: failures are thrown on the collector's side so earlier text is never lost. */
+    private sealed interface Ev {
+        class Text(val text: String) : Ev
+        class Fail(val error: LlmException) : Ev
+    }
+
+    override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow<Ev> {
+        try {
+            val creds = credentialsOrThrow(request.apiKey, request.model)
+            var emitted = false
+            var attempt = 0
+            while (true) {
+                attempt++
+                try {
+                    streamOnce(request, creds, attempt) { chunk ->
+                        emitted = true
+                        emit(Ev.Text(chunk))
+                    }
+                    return@flow
+                } catch (e: LlmException) {
+                    val canRetry = !emitted && RetryPolicy.shouldRetry(e.error) && attempt <= options.maxRetries
+                    if (!canRetry) throw e
+                    val wait = RetryPolicy.delayBeforeRetry(attempt, random)
+                    options.events.onRetry(attempt, options.maxRetries, wait)
+                    sleeper(wait)
                 }
-                return@flow
-            } catch (e: LlmException) {
-                val canRetry = !emitted && RetryPolicy.shouldRetry(e.error) && attempt <= options.maxRetries
-                if (!canRetry) throw e
-                val wait = RetryPolicy.delayBeforeRetry(attempt, random)
-                options.events.onRetry(attempt, options.maxRetries, wait)
-                sleeper(wait)
             }
+        } catch (e: LlmException) {
+            emit(Ev.Fail(e))
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(Dispatchers.IO).transform { ev ->
+        when (ev) {
+            is Ev.Text -> emit(ev.text)
+            is Ev.Fail -> throw ev.error
+        }
+    }
 
     private suspend fun streamOnce(request: ChatRequest, creds: CloudflareParsing.Credentials, attempt: Int, onText: suspend (String) -> Unit) {
         val path = chatPath(creds)

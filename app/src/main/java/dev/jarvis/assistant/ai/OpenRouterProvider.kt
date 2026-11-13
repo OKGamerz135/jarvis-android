@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -156,28 +157,46 @@ class OpenRouterProvider(
 
     // ------------------------------------------------------------------ streaming generation
 
-    override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow {
-        val model = resolveModel(request.model, request.apiKey)
-        val req = request.copy(model = model)
-        var emitted = false
-        var attempt = 0
-        while (true) {
-            attempt++
-            try {
-                streamOnce(req, attempt) { chunk ->
-                    emitted = true
-                    emit(chunk)
+    /**
+     * Text and failures travel through the IO flow as events and a failure is thrown only on the collector's side, so
+     * text that arrived just before an error is always delivered first and kept as a partial reply.
+     */
+    private sealed interface Ev {
+        class Text(val text: String) : Ev
+        class Fail(val error: LlmException) : Ev
+    }
+
+    override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow<Ev> {
+        try {
+            val model = resolveModel(request.model, request.apiKey)
+            val req = request.copy(model = model)
+            var emitted = false
+            var attempt = 0
+            while (true) {
+                attempt++
+                try {
+                    streamOnce(req, attempt) { chunk ->
+                        emitted = true
+                        emit(Ev.Text(chunk))
+                    }
+                    return@flow
+                } catch (e: LlmException) {
+                    val canRetry = !emitted && RetryPolicy.shouldRetry(e.error) && attempt <= options.maxRetries
+                    if (!canRetry) throw e
+                    val wait = RetryPolicy.delayBeforeRetry(attempt, random)
+                    options.events.onRetry(attempt, options.maxRetries, wait)
+                    sleeper(wait)
                 }
-                return@flow
-            } catch (e: LlmException) {
-                val canRetry = !emitted && RetryPolicy.shouldRetry(e.error) && attempt <= options.maxRetries
-                if (!canRetry) throw e
-                val wait = RetryPolicy.delayBeforeRetry(attempt, random)
-                options.events.onRetry(attempt, options.maxRetries, wait)
-                sleeper(wait)
             }
+        } catch (e: LlmException) {
+            emit(Ev.Fail(e))
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(Dispatchers.IO).transform { ev ->
+        when (ev) {
+            is Ev.Text -> emit(ev.text)
+            is Ev.Fail -> throw ev.error
+        }
+    }
 
     private suspend fun streamOnce(request: ChatRequest, attempt: Int, onText: suspend (String) -> Unit) {
         val call = Call(CallKind.GENERATE_STREAM, "POST", request.model, CHAT_PATH, request.apiKey, request.sizeInChars(), attempt)

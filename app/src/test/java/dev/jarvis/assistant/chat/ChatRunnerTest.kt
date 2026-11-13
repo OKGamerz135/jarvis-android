@@ -134,7 +134,8 @@ class ChatRunnerTest {
 
     @Test
     fun stopUpdatesTheUiImmediately() = runBlocking {
-        val llm = provider { emit("a"); awaitCancellation() }
+        // Slow teardown keeps the "stopping" state alive long enough to observe it deterministically.
+        val llm = provider { emit("a"); try { awaitCancellation() } finally { kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { delay(300) } } }
         val r = runner(llm)
         r.awaitIdle()
         r.send("x")
