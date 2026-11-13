@@ -474,4 +474,49 @@ class ChatRunnerFailoverTest {
         assertEquals(R, s.temporaryProvider)
         assertEquals(ResetSource.DOCUMENTED, ledger.record(O)!!.source)
     }
+
+    // ------------------------------------------------------------------ Cloudflare in the chain
+
+    private class CloudflareFake(block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : Fake(block)
+
+    @Test fun cloudflareDailyQuotaFailsOverToGroqAndRecordsADocumentedReset() = runBlocking {
+        val C = AiProvider.CLOUDFLARE
+        val a = CloudflareFake { throw fail(LlmError.QuotaExhausted(Instant.ofEpochMilli(now + 3_600_000), "free-neurons-per-day", ResetSource.DOCUMENTED)) }
+        val b = GroqFake { emit("groq answer") }
+        val r = runner(FakeSource(mapOf(C to a, R to b), preferred = C))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(R, s.temporaryProvider)
+        assertEquals(ResetSource.DOCUMENTED, ledger.record(C)!!.source)
+        assertEquals(listOf("hello", "groq answer"), s.conversation.messages.map { it.text })
+    }
+
+    @Test fun geminiToCloudflareWhenEarlierProvidersAreDisabledAndPerMinuteLimitsNeverSwitch() = runBlocking {
+        val C = AiProvider.CLOUDFLARE
+        val a = GeminiFake { throw quota() }
+        val c = CloudflareFake { emit("cf answer") }
+        val r = runner(FakeSource(mapOf(G to a, C to c), preferred = G, disabled = setOf(R)))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(C, s.temporaryProvider)
+        assertEquals("CloudflareFake", s.dispatch!!.adapter)
+        assertEquals(C.label, s.conversation.messages.last().provider)
+
+        val a2 = CloudflareFake { throw fail(LlmError.Unclear429(null)) }
+        val g2 = GeminiFake { emit("must not be called") }
+        val storage2 = FileChatStorage(Files.createTempDirectory("fo3").toFile())
+        val scope2 = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val ledger2 = newLedger { now }
+        val r2 = ChatRunner(
+            storage2, ChatEngine(storage2), scope2, Dispatchers.IO,
+            FakeSource(mapOf(C to a2, G to g2), preferred = C).also { it.ledger = ledger2 }, ledger2, net,
+            clock = { now }, countdownSeconds = 2, tickMs = 20,
+        )
+        r2.idle(); r2.send("hi")
+        val s2 = r2.idle()
+        scope2.cancel()
+        assertEquals(0, g2.calls.get())
+        assertNull(s2.temporaryProvider)
+        assertNotNull(s2.problem)
+    }
 }

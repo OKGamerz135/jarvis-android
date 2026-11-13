@@ -32,6 +32,7 @@ class SettingsRepository(context: Context) {
         val PERSONALITY = stringPreferencesKey("personality")
         val TONE = stringPreferencesKey("tone")
         val HUMOUR = intPreferencesKey("humour")
+        val PROFANITY = intPreferencesKey("profanity")
         val LENGTH = stringPreferencesKey("length")
         val LANGUAGE = stringPreferencesKey("language")
         val ADDRESS = stringPreferencesKey("address_as")
@@ -40,6 +41,7 @@ class SettingsRepository(context: Context) {
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GROQ_MODEL = stringPreferencesKey("groq_model")
         val OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
+        val CLOUDFLARE_MODEL = stringPreferencesKey("cloudflare_model")
         val ACKNOWLEDGED = stringSetPreferencesKey("acknowledged_providers")
         val FAILOVER = booleanPreferencesKey("failover_enabled")
         val ORDER = stringPreferencesKey("provider_order")
@@ -57,6 +59,7 @@ class SettingsRepository(context: Context) {
                 personality = enumOr(this[PERSONALITY], d.personality),
                 tone = enumOr(this[TONE], d.tone),
                 humour = (this[HUMOUR] ?: d.humour).coerceIn(0, Humour.MAX),
+                profanity = (this[PROFANITY] ?: d.profanity).coerceIn(0, Profanity.MAX),
                 length = enumOr(this[LENGTH], d.length),
                 language = this[LANGUAGE] ?: d.language,
                 addressAs = this[ADDRESS] ?: d.addressAs,
@@ -65,6 +68,7 @@ class SettingsRepository(context: Context) {
                 geminiModel = this[GEMINI_MODEL] ?: d.geminiModel,
                 groqModel = this[GROQ_MODEL] ?: d.groqModel,
                 openrouterModel = this[OPENROUTER_MODEL] ?: d.openrouterModel,
+                cloudflareModel = this[CLOUDFLARE_MODEL] ?: d.cloudflareModel,
                 acknowledged = (this[ACKNOWLEDGED] ?: emptySet())
                     .mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
                     .toSet(),
@@ -78,6 +82,7 @@ class SettingsRepository(context: Context) {
             this[PERSONALITY] = s.personality.name
             this[TONE] = s.tone.name
             this[HUMOUR] = s.humour
+            this[PROFANITY] = s.profanity.coerceIn(0, Profanity.MAX)
             this[LENGTH] = s.length.name
             this[LANGUAGE] = s.language
             this[ADDRESS] = s.addressAs
@@ -86,6 +91,7 @@ class SettingsRepository(context: Context) {
             this[GEMINI_MODEL] = s.geminiModel
             this[GROQ_MODEL] = s.groqModel
             this[OPENROUTER_MODEL] = s.openrouterModel
+            this[CLOUDFLARE_MODEL] = s.cloudflareModel
             this[ACKNOWLEDGED] = s.acknowledged.map { it.name }.toSet()
             this[FAILOVER] = s.failoverEnabled
             this[ORDER] = s.providerOrder.joinToString(",") { it.name }

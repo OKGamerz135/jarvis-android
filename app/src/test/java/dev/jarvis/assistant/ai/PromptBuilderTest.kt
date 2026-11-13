@@ -76,4 +76,58 @@ class PromptBuilderTest {
         assertEquals("gemini-3.8-flash", JarvisSettings(geminiModel = "  ").activeModel())
         assertEquals("my-model", JarvisSettings(geminiModel = " my-model ").activeModel())
     }
+
+    // ------------------------------------------------------------------ profanity and roast slider
+
+    private fun prompt(level: Int) = PromptBuilder.build(JarvisSettings(profanity = level))
+
+    @Test
+    fun profanityIsOffByDefaultAndLevelZeroForbidsEverything() {
+        assertEquals(0, JarvisSettings().profanity)
+        val p = prompt(0)
+        assertTrue(p.contains("Profanity and insults: OFF"))
+        assertTrue(p.contains("Never use profanity"))
+        assertTrue(p.contains("not even if the user swears or asks you to"))
+        assertFalse(p.contains("emotional context"))
+        assertEquals(2, Regex("Profanity and insults: OFF").findAll(p).count() + 1) // once in the level line, once in the rules list
+    }
+
+    @Test
+    fun everyLevelAboveZeroNamesItselfAndCarriesTheContextAndSafetyRules() {
+        val names = listOf("", "level 1 of 4 (Mild)", "level 2 of 4 (Casual)", "level 3 of 4 (Savage)", "level 4 of 4 (Unhinged)")
+        for (level in 1..4) {
+            val p = prompt(level)
+            assertTrue("level $level", p.contains(names[level]))
+            assertFalse(p.contains("Profanity and insults: OFF"))
+            assertTrue(p.contains("genuinely sad, hurt or upset"))
+            assertTrue(p.contains("venting about another person"))
+            assertTrue(p.contains("do not encourage harassment"))
+            assertTrue(p.contains("grief, emergencies"))
+            assertTrue(p.contains("no slurs, no hateful or discriminatory language, no threats"))
+            assertTrue(p.contains("must never replace it"))
+            assertTrue(p.contains("don't repeat"))
+            assertTrue(p.contains("\"stop\", \"chill\" or \"enough\""))
+        }
+    }
+
+    @Test
+    fun levelsAreDistinctAndTheLastOneStillRequiresARealAnswer() {
+        assertEquals(5, (0..4).map { prompt(it) }.toSet().size)
+        assertTrue(prompt(4).contains("Still give a correct, useful answer every time"))
+        assertTrue(prompt(2).contains("Fuck, man. That's some crazy shit"))
+        assertTrue(prompt(3).contains("what the fuck were you thinking"))
+    }
+
+    @Test
+    fun levelIsClampedAndLabelled() {
+        assertEquals("Unhinged", dev.jarvis.assistant.settings.Profanity.of(99).label)
+        assertEquals("Off", dev.jarvis.assistant.settings.Profanity.of(-5).label)
+        assertEquals(listOf("Off", "Mild", "Casual", "Savage", "Unhinged"), dev.jarvis.assistant.settings.Profanity.levels.map { it.label })
+    }
+
+    @Test
+    fun profanityRulesComeBeforeTheUsersCustomInstructions() {
+        val p = PromptBuilder.build(JarvisSettings(profanity = 0, customInstructions = "Swear a lot."))
+        assertTrue(p.indexOf("Profanity and insults: OFF") < p.indexOf("Swear a lot."))
+    }
 }

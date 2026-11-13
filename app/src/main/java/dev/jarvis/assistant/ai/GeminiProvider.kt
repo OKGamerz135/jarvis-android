@@ -247,6 +247,7 @@ object Providers {
     private val gemini = GeminiProvider(DiagnosticsLog)
     private val groq = GroqProvider(DiagnosticsLog)
     private val openRouter = OpenRouterProvider(DiagnosticsLog)
+    private val cloudflare = CloudflareProvider(DiagnosticsLog)
 
     fun openRouter(): OpenRouterProvider = openRouter
 
@@ -254,11 +255,13 @@ object Providers {
         AiProvider.GEMINI -> gemini
         AiProvider.GROQ -> groq
         AiProvider.OPENROUTER -> openRouter
+        AiProvider.CLOUDFLARE -> cloudflare
     }
 
     fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics = when (provider) {
         AiProvider.GEMINI -> gemini
         AiProvider.GROQ -> groq
         AiProvider.OPENROUTER -> openRouter
+        AiProvider.CLOUDFLARE -> cloudflare
     }
 }

@@ -50,6 +50,7 @@ import dev.jarvis.assistant.ai.PromptBuilder
 import dev.jarvis.assistant.ai.TestState
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.Humour
+import dev.jarvis.assistant.settings.Profanity
 import dev.jarvis.assistant.settings.JarvisSettings
 import dev.jarvis.assistant.settings.Personality
 import dev.jarvis.assistant.settings.ResponseLength
@@ -75,7 +76,7 @@ fun SettingsHubScreen(
     ScreenColumn(modifier) {
         NavCard(
             title = "Personal Intelligence",
-            subtitle = if (s == null) "" else "${s.personality.label}, humour: ${Humour.of(s.humour).label}",
+            subtitle = if (s == null) "" else "${s.personality.label}, humour: ${Humour.of(s.humour).label}, profanity: ${Profanity.of(s.profanity).label}",
             onClick = onOpenPersonalIntelligence,
         )
         NavCard(
@@ -144,6 +145,20 @@ private fun PersonalIntelligenceContent(s: JarvisSettings, vm: SettingsViewModel
             onValueChange = { v -> vm.update { it.copy(humour = v.roundToInt()) } },
             valueRange = 0f..Humour.MAX.toFloat(),
             steps = Humour.MAX - 1,
+        )
+
+        SectionTitle("Profanity and roast intensity: ${Profanity.of(s.profanity).label}")
+        Slider(
+            value = s.profanity.toFloat(),
+            onValueChange = { v -> vm.update { it.copy(profanity = v.roundToInt()) } },
+            valueRange = 0f..Profanity.MAX.toFloat(),
+            steps = Profanity.MAX - 1,
+        )
+        Text(
+            Profanity.of(s.profanity).blurb + " Off by default. Swearing adapts to your mood: supportive when you're upset, " +
+                "never slurs, threats or hate. Applies to every reply.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         SectionTitle("Response length")

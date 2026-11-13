@@ -10,6 +10,7 @@ object ChatLimits {
         AiProvider.GROQ -> 10_000
         AiProvider.GEMINI -> 60_000
         AiProvider.OPENROUTER -> 24_000 // free models vary a lot in context size; stay conservative
+        AiProvider.CLOUDFLARE -> 24_000 // the free allowance is counted in neurons (tokens), so keep requests modest
     }
 }
 

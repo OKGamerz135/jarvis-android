@@ -2,6 +2,7 @@ package dev.jarvis.assistant.ai
 
 import dev.jarvis.assistant.settings.Humour
 import dev.jarvis.assistant.settings.JarvisSettings
+import dev.jarvis.assistant.settings.Profanity
 
 /** Turns the user's Personal Intelligence settings into the system prompt sent to the AI. */
 object PromptBuilder {
@@ -13,6 +14,7 @@ object PromptBuilder {
         appendLine()
         appendLine(s.personality.prompt)
         appendLine(Humour.of(s.humour).prompt)
+        appendLine(Profanity.of(s.profanity).prompt)
         appendLine(s.tone.prompt)
         appendLine(s.length.prompt)
 
@@ -33,6 +35,7 @@ object PromptBuilder {
         appendLine("- Use the conversation so far. Understand follow-up questions without making the user repeat themselves.")
         appendLine("- Be serious and gentle when the situation calls for it (distress, health, safety, grief), whatever the humour setting says.")
         appendLine("- Never mock the user about sensitive things such as health, family, religion or identity.")
+        if (s.profanity <= 0) appendLine("- ${Profanity.OFF_RULE}")
         appendLine("- Right now you can only chat. You cannot place calls, send messages, see the screen or change phone settings yet, so never claim to have done any of that.")
 
         val custom = s.customInstructions.trim().take(MAX_CUSTOM)
