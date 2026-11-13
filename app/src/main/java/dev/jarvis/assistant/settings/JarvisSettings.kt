@@ -83,6 +83,16 @@ enum class AiProvider(
             "second-hand information that it doesn't train on your data, so read Groq's terms before " +
             "sending anything private.",
     ),
+    OPENROUTER(
+        "OpenRouter",
+        "openrouter_api_key",
+        "auto-free",
+        "Create a key at openrouter.ai/keys. JARVIS only ever calls models whose id ends in \":free\", so it can't spend " +
+            "credits. Leave the model as auto-free, or type a free model id such as one ending in :free.",
+        "Free-model warning: free OpenRouter models are served by third-party providers that may log what you send or " +
+            "train on it. OpenRouter has a separate privacy setting for free models; check it. Free models are limited to " +
+            "20 requests a minute and 50 a day unless you have bought credits (which JARVIS never does for you).",
+    ),
 }
 
 data class JarvisSettings(
@@ -97,6 +107,7 @@ data class JarvisSettings(
     val provider: AiProvider = AiProvider.GEMINI,
     val geminiModel: String = AiProvider.GEMINI.defaultModel,
     val groqModel: String = AiProvider.GROQ.defaultModel,
+    val openrouterModel: String = AiProvider.OPENROUTER.defaultModel,
     /** Providers whose cloud/privacy warning the user has read and accepted. */
     val acknowledged: Set<AiProvider> = emptySet(),
     /** When a provider's quota is really used up, offer to switch to another one (with a countdown and Cancel). */
@@ -111,10 +122,17 @@ data class JarvisSettings(
 
     fun modelOf(p: AiProvider): String = modelFor(p).trim().ifBlank { p.defaultModel }
 
-    fun modelFor(p: AiProvider): String = if (p == AiProvider.GEMINI) geminiModel else groqModel
+    fun modelFor(p: AiProvider): String = when (p) {
+        AiProvider.GEMINI -> geminiModel
+        AiProvider.GROQ -> groqModel
+        AiProvider.OPENROUTER -> openrouterModel
+    }
 
-    fun withModel(p: AiProvider, model: String): JarvisSettings =
-        if (p == AiProvider.GEMINI) copy(geminiModel = model) else copy(groqModel = model)
+    fun withModel(p: AiProvider, model: String): JarvisSettings = when (p) {
+        AiProvider.GEMINI -> copy(geminiModel = model)
+        AiProvider.GROQ -> copy(groqModel = model)
+        AiProvider.OPENROUTER -> copy(openrouterModel = model)
+    }
 
     /** The model to actually call: the saved name, or the provider default when blank. */
     fun activeModel(): String = modelFor(provider).trim().ifBlank { provider.defaultModel }

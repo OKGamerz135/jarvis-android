@@ -439,4 +439,39 @@ class ChatRunnerFailoverTest {
         assertFalse(all.contains("private question"))
         assertFalse(all.contains("secret reply"))
     }
+
+    // ------------------------------------------------------------------ OpenRouter in the chain
+
+    private class OpenRouterFake(block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : Fake(block)
+
+    @Test fun chainGeminiThenGroqThenOpenRouterEachCalledOnceWithoutDuplicates() = runBlocking {
+        val O = AiProvider.OPENROUTER
+        val a = GeminiFake { throw quota() }
+        val b = GroqFake { throw quota() }
+        val c = OpenRouterFake { emit("openrouter answer") }
+        val r = runner(FakeSource(mapOf(G to a, R to b, O to c), preferred = G))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(1, a.calls.get())
+        assertEquals(1, b.calls.get())
+        assertEquals(1, c.calls.get())
+        assertEquals(listOf("hello", "openrouter answer"), s.conversation.messages.map { it.text })
+        assertEquals(O.label, s.conversation.messages.last().provider)
+        assertEquals("model-${O.name}", c.requests.single().model)
+        assertEquals(O, s.temporaryProvider)
+        assertEquals(G, s.preferredProvider)
+        assertEquals("OpenRouterFake", s.dispatch!!.adapter)
+        assertFalse(s.dispatch!!.mismatch)
+    }
+
+    @Test fun openRouterDailyQuotaFailsOverToGroqAndRecordsDocumentedReset() = runBlocking {
+        val O = AiProvider.OPENROUTER
+        val a = OpenRouterFake { throw fail(LlmError.QuotaExhausted(Instant.ofEpochMilli(now + 3_600_000), "free-models-per-day", ResetSource.DOCUMENTED)) }
+        val b = GroqFake { emit("groq answer") }
+        val r = runner(FakeSource(mapOf(O to a, R to b), preferred = O))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(R, s.temporaryProvider)
+        assertEquals(ResetSource.DOCUMENTED, ledger.record(O)!!.source)
+    }
 }

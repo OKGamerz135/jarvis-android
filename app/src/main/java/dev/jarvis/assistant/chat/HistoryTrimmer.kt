@@ -9,6 +9,7 @@ object ChatLimits {
     fun historyBudgetChars(provider: AiProvider): Int = when (provider) {
         AiProvider.GROQ -> 10_000
         AiProvider.GEMINI -> 60_000
+        AiProvider.OPENROUTER -> 24_000 // free models vary a lot in context size; stay conservative
     }
 }
 

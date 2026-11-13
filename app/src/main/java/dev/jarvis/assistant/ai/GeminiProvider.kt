@@ -246,14 +246,19 @@ class GeminiProvider(
 object Providers {
     private val gemini = GeminiProvider(DiagnosticsLog)
     private val groq = GroqProvider(DiagnosticsLog)
+    private val openRouter = OpenRouterProvider(DiagnosticsLog)
+
+    fun openRouter(): OpenRouterProvider = openRouter
 
     fun forProvider(provider: AiProvider): LlmProvider = when (provider) {
         AiProvider.GEMINI -> gemini
         AiProvider.GROQ -> groq
+        AiProvider.OPENROUTER -> openRouter
     }
 
     fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics = when (provider) {
         AiProvider.GEMINI -> gemini
         AiProvider.GROQ -> groq
+        AiProvider.OPENROUTER -> openRouter
     }
 }

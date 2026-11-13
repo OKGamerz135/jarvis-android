@@ -15,6 +15,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import dev.jarvis.assistant.ai.ErrorMessages
+import dev.jarvis.assistant.ai.LlmException
+import dev.jarvis.assistant.ai.OpenRouterParsing
+import dev.jarvis.assistant.ai.Providers
+import dev.jarvis.assistant.settings.SecureKeyStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +57,10 @@ fun ProvidersScreen(
     val records by ledger.records.collectAsStateWithLifecycle()
     val log by DiagnosticsLog.entries.collectAsStateWithLifecycle()
     val chat by chatVm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var quotaText by remember { mutableStateOf<String?>(null) }
+    var quotaBusy by remember { mutableStateOf(false) }
     val s = settings
     if (s == null) {
         Loading(modifier)
@@ -131,6 +147,25 @@ fun ProvidersScreen(
                         ) { Text("Down") }
                         TextButton(enabled = p != s.provider, onClick = { vm.update { it.copy(provider = p) } }) { Text("Make preferred") }
                         OutlinedButton(onClick = { onConfigure(p) }) { Text("Key and model") }
+                    }
+                    if (p == AiProvider.OPENROUTER && keys[p] == true) {
+                        OutlinedButton(
+                            enabled = !quotaBusy,
+                            onClick = {
+                                quotaBusy = true
+                                quotaText = "Asking OpenRouter..."
+                                scope.launch {
+                                    quotaText = try {
+                                        val key = withContext(Dispatchers.IO) { SecureKeyStore(context).read(p.keyName) }.orEmpty()
+                                        OpenRouterParsing.describe(Providers.openRouter().freeQuota(key))
+                                    } catch (e: LlmException) {
+                                        ErrorMessages.of(e.error)
+                                    }
+                                    quotaBusy = false
+                                }
+                            },
+                        ) { Text("Check free quota") }
+                        quotaText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     }
                     if (record != null) {
                         OutlinedButton(onClick = { ledger.clear(p); chatVm.checkRecovery() }) { Text("Mark as available") }
