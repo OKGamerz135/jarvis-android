@@ -40,9 +40,9 @@ class ProviderReliabilityTest {
     }
 
     @Test
-    fun theProviderListIsExactlyTheFiveWorkingOnesInOrder() {
+    fun theProviderListIsExactlyTheSixWorkingOnesInOrder() {
         assertEquals(
-            listOf(AiProvider.GEMINI, AiProvider.GROQ, AiProvider.OPENROUTER, AiProvider.CLOUDFLARE, AiProvider.ZAI),
+            listOf(AiProvider.GEMINI, AiProvider.GROQ, AiProvider.OPENROUTER, AiProvider.CLOUDFLARE, AiProvider.ZAI, AiProvider.MISTRAL),
             AiProvider.entries.toList(),
         )
     }
