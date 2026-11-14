@@ -66,8 +66,8 @@ class ChatEngine(
         target: ChatTarget,
         llm: LlmProvider,
         options: CallOptions,
-        onPartial: (String) -> Unit,
         memoryNote: String = "",
+        onPartial: (String) -> Unit,
     ): GenResult {
         val history = withReminder(HistoryTrimmer.select(conv.messages, target.historyBudgetChars).messages, target.styleReminder)
         // Relevant memories are added to a COPY of the system prompt for this request only. The saved conversation and

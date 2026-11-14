@@ -104,7 +104,7 @@ class ChatMemoryTest {
         val engine = ChatEngine(storage)
         for (p in AiProvider.entries) {
             val conv = engine.addUserMessage(Conversation.empty("n-${p.name}", 0), "Save this in memory that I have an iQOO 16")
-            engine.generate(conv, ChatTarget(p, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions(), { }, memoryNote = "Memory status: SAVED")
+            engine.generate(conv, ChatTarget(p, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions(), memoryNote = "Memory status: SAVED") { }
             assertTrue(p.name, requests.last().systemPrompt.endsWith("Memory status: SAVED"))
             assertFalse(p.name, storage.load("n-${p.name}")!!.messages.any { it.text.contains("Memory status") })
         }
