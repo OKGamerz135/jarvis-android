@@ -45,6 +45,7 @@ class SettingsRepository(context: Context) {
         val ZAI_MODEL = stringPreferencesKey("zai_model")
         val ACKNOWLEDGED = stringSetPreferencesKey("acknowledged_providers")
         val FAILOVER = booleanPreferencesKey("failover_enabled")
+        val MEMORY_ENABLED = booleanPreferencesKey("memory_enabled")
         val ORDER = stringPreferencesKey("provider_order")
         val DISABLED = stringSetPreferencesKey("disabled_providers")
 
@@ -75,6 +76,7 @@ class SettingsRepository(context: Context) {
                     .mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
                     .toSet(),
                 failoverEnabled = this[FAILOVER] ?: d.failoverEnabled,
+                memoryEnabled = this[MEMORY_ENABLED] ?: d.memoryEnabled,
                 providerOrder = this[ORDER]?.split(",")?.let { providersFrom(it) }?.ifEmpty { null } ?: d.providerOrder,
                 disabledProviders = providersFrom(this[DISABLED] ?: emptySet()).toSet(),
             )
@@ -97,6 +99,7 @@ class SettingsRepository(context: Context) {
             this[ZAI_MODEL] = s.zaiModel
             this[ACKNOWLEDGED] = s.acknowledged.map { it.name }.toSet()
             this[FAILOVER] = s.failoverEnabled
+            this[MEMORY_ENABLED] = s.memoryEnabled
             this[ORDER] = s.providerOrder.joinToString(",") { it.name }
             this[DISABLED] = s.disabledProviders.map { it.name }.toSet()
         }

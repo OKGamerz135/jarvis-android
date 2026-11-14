@@ -38,6 +38,7 @@ import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.ui.chat.ChatScreen
 import dev.jarvis.assistant.ui.chat.HistoryScreen
 import dev.jarvis.assistant.ui.settings.DiagnosticsScreen
+import dev.jarvis.assistant.ui.settings.MemoryScreen
 import dev.jarvis.assistant.ui.settings.PersonalIntelligenceScreen
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.ui.settings.ProviderScreen
@@ -66,6 +67,7 @@ private enum class Screen(val title: String, val parent: Screen?) {
     Providers("AI providers", Settings),
     Provider("Key and model", Providers),
     Diagnostics("Diagnostics log", Settings),
+    Memory("Memory", Settings),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -111,6 +113,7 @@ private fun JarvisApp() {
                 onOpenPersonalIntelligence = { screen = Screen.PersonalIntelligence },
                 onOpenProvider = { screen = Screen.Providers },
                 onOpenDiagnostics = { screen = Screen.Diagnostics },
+                onOpenMemory = { screen = Screen.Memory },
                 modifier = modifier,
             )
             Screen.PersonalIntelligence -> PersonalIntelligenceScreen(modifier)
@@ -124,6 +127,7 @@ private fun JarvisApp() {
                 modifier = modifier,
             )
             Screen.Diagnostics -> DiagnosticsScreen(modifier)
+            Screen.Memory -> MemoryScreen(modifier)
         }
     }
 }

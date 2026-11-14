@@ -66,6 +66,7 @@ fun SettingsHubScreen(
     onOpenPersonalIntelligence: () -> Unit,
     onOpenProvider: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenMemory: () -> Unit,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
 ) {
@@ -86,6 +87,11 @@ fun SettingsHubScreen(
                 "Preferred: ${s.provider.label}, $saved. Failover ${if (s.failoverEnabled) "on" else "off"}"
             },
             onClick = onOpenProvider,
+        )
+        NavCard(
+            title = "Memory",
+            subtitle = if (s == null) "" else "What JARVIS remembers about you. Use memory: ${if (s.memoryEnabled) "on" else "off"}",
+            onClick = onOpenMemory,
         )
         NavCard(
             title = "Diagnostics log",

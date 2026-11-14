@@ -237,6 +237,8 @@ data class JarvisSettings(
     val language: String = "",
     val addressAs: String = "sir",
     val customInstructions: String = "",
+    /** Remember useful facts from chats and add the relevant ones to requests. Existing memories are kept when off. */
+    val memoryEnabled: Boolean = true,
     val provider: AiProvider = AiProvider.GEMINI,
     val geminiModel: String = AiProvider.GEMINI.defaultModel,
     val groqModel: String = AiProvider.GROQ.defaultModel,
