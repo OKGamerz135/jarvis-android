@@ -99,4 +99,50 @@ class ChatMemoryTest {
         withTimeout(5000) { while (seen.isEmpty()) delay(5) }
         assertEquals("My favourite colour is orange.", seen.first())
     }
+
+    @Test fun theHonestMemoryNoteReachesEveryProviderAndIsNotSavedInHistory() = runBlocking {
+        val engine = ChatEngine(storage)
+        for (p in AiProvider.entries) {
+            val conv = engine.addUserMessage(Conversation.empty("n-${p.name}", 0), "Save this in memory that I have an iQOO 16")
+            engine.generate(conv, ChatTarget(p, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions(), memoryNote = "Memory status: SAVED") { }
+            assertTrue(p.name, requests.last().systemPrompt.endsWith("Memory status: SAVED"))
+            assertFalse(p.name, storage.load("n-${p.name}")!!.messages.any { it.text.contains("Memory status") })
+        }
+    }
+
+    @Test fun theRunnerWaitsForMemoryAndGivesTheReplyItsTrueResult() = runBlocking {
+        val source = object : ProviderSource {
+            override suspend fun resolve(provider: AiProvider?) =
+                Resolved.Ready(ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
+            override suspend fun snapshot() = ProviderSnapshot(
+                AiProvider.GROQ, false,
+                AiProvider.entries.map { Candidate(it, "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
+            )
+        }
+        val runner = ChatRunner(
+            storage, ChatEngine(storage), scope, Dispatchers.IO, source, newLedger(), tickMs = 5,
+            memoryObserver = MemoryObserver { delay(100); "Memory status: UPDATED" },
+        )
+        withTimeout(5000) { while (runner.send("my favourite colour is blue now") != SendResult.ACCEPTED) delay(5) }
+        withTimeout(5000) { while (requests.isEmpty()) delay(5) }
+        assertTrue(requests.first().systemPrompt.contains("Memory status: UPDATED"))
+    }
+
+    @Test fun aHungMemoryNeverBlocksTheReplyAndIsNotClaimedAsSaved() = runBlocking {
+        val source = object : ProviderSource {
+            override suspend fun resolve(provider: AiProvider?) =
+                Resolved.Ready(ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
+            override suspend fun snapshot() = ProviderSnapshot(
+                AiProvider.GROQ, false,
+                AiProvider.entries.map { Candidate(it, "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
+            )
+        }
+        val runner = ChatRunner(
+            storage, ChatEngine(storage), scope, Dispatchers.IO, source, newLedger(), tickMs = 5,
+            memoryObserver = MemoryObserver { delay(60_000); "never" },
+        )
+        withTimeout(5000) { while (runner.send("hello there friend") != SendResult.ACCEPTED) delay(5) }
+        withTimeout(10_000) { while (requests.isEmpty()) delay(20) }
+        assertTrue(requests.first().systemPrompt.contains("did not finish in time"))
+    }
 }

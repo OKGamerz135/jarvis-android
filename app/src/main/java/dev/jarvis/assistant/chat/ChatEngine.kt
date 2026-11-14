@@ -66,6 +66,7 @@ class ChatEngine(
         target: ChatTarget,
         llm: LlmProvider,
         options: CallOptions,
+        memoryNote: String = "",
         onPartial: (String) -> Unit,
     ): GenResult {
         val history = withReminder(HistoryTrimmer.select(conv.messages, target.historyBudgetChars).messages, target.styleReminder)
@@ -78,7 +79,7 @@ class ChatEngine(
         } catch (e: Exception) {
             ""
         }
-        val system = if (extra.isBlank()) target.systemPrompt else target.systemPrompt + "\n\n" + extra
+        val system = listOf(target.systemPrompt, extra, memoryNote).filter { it.isNotBlank() }.joinToString("\n\n")
         val request = ChatRequest(target.model, target.apiKey, system, history)
         val reply = StringBuilder()
         try {

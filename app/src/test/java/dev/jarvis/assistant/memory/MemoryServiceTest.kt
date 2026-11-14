@@ -122,7 +122,7 @@ class MemoryServiceTest {
     @Test fun brokenStorageNeverThrowsAndRecoversLater() = runBlocking {
         var broken = true
         val s = MemoryService({ if (broken) error("disk gone") else storage }, io = Dispatchers.Unconfined)
-        assertEquals(ObserveResult(), s.observe("My favourite colour is orange."))
+        assertTrue(s.observe("My favourite colour is orange.").failed)
         assertEquals("", s.contextFor(listOf("colour")))
         assertTrue(s.addManual(MemoryCategory.OTHER, "something useful") is AddResult.Failed)
         s.delete("x"); s.clearAll(); s.refresh()

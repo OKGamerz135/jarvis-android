@@ -8,6 +8,7 @@ import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.ai.ResetFormat
 import dev.jarvis.assistant.ai.ResetSource
+import dev.jarvis.assistant.memory.MemoryStatusNote
 import dev.jarvis.assistant.providers.QuotaLedger
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CancellationException
@@ -122,6 +123,9 @@ class ChatRunner(
     private var recoveryTimer: Job? = null
     private val simulateNext = AtomicBoolean(false)
     private val visible = MutableStateFlow(true)
+
+    /** The honest memory result for the message being answered; kept across retries and failover of that one message. */
+    @Volatile private var memoryNote: String = ""
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -298,14 +302,16 @@ class ChatRunner(
             if (userText != null) {
                 val withUser = withContext(io) { engine.addUserMessage(_state.value.conversation, userText) }
                 _state.update { it.copy(conversation = withUser) }
-                // Background and best-effort: remembering can never slow down or fail the reply.
-                scope.launch(io) {
+                // Remembering happens BEFORE the reply is requested, so the reply is based on what really happened:
+                // the AI is given the true result and can only claim a save that is in the database. It is bounded
+                // by a timeout and can never fail the chat.
+                memoryNote = withContext(io) {
                     try {
-                        memoryObserver.onUserMessage(userText)
+                        withTimeoutOrNull(MEMORY_TIMEOUT_MS) { memoryObserver.onUserMessage(userText) } ?: MemoryStatusNote.UNKNOWN
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        // ignored on purpose; memory text is never logged
+                        MemoryStatusNote.UNKNOWN // memory text is never logged
                     }
                 }
             }
@@ -564,6 +570,7 @@ class ChatRunner(
                 llm = llm,
                 options = CallOptions(maxRetries, events),
                 onPartial = { text -> _state.update { it.copy(streaming = text, note = null) } },
+                memoryNote = memoryNote,
             )
         }
         val ok = result is GenResult.Success
@@ -592,6 +599,7 @@ class ChatRunner(
     }
 
     companion object {
+        const val MEMORY_TIMEOUT_MS = 3000L
         const val REJECTION = "Still answering. Your message was NOT sent and was not queued. Wait for the reply or tap Stop, then send it again."
     }
 }

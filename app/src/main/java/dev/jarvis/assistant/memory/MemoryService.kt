@@ -20,7 +20,19 @@ sealed interface AddResult {
 }
 
 /** What happened to one chat message. Counts only; never the text. */
-data class ObserveResult(val saved: Int = 0, val updated: Int = 0, val duplicates: Int = 0, val proposed: Int = 0, val blocked: Int = 0)
+data class ObserveResult(
+    val saved: Int = 0,
+    val updated: Int = 0,
+    val duplicates: Int = 0,
+    val proposed: Int = 0,
+    val blocked: Int = 0,
+    /** The memory store failed, so nothing in this message can be claimed as saved. */
+    val failed: Boolean = false,
+    /** The user asked JARVIS to remember something, whether or not anything could be stored. */
+    val askedToSave: Boolean = false,
+    /** The memory limit was reached, so a new fact could not be added. */
+    val full: Boolean = false,
+)
 
 /**
  * Everything the app does with memories. Every public call is safe: a database problem is caught and turned into a
@@ -67,18 +79,28 @@ class MemoryService(
 
     /** Looks at one user message and saves, updates or proposes memories. Never throws. */
     suspend fun observe(userText: String): ObserveResult {
+        val asked = MemoryExtractor.asksToSave(userText)
         val candidates = MemoryExtractor.extract(userText)
-        if (candidates.isEmpty()) return ObserveResult()
-        return safe(ObserveResult()) { s ->
+        if (candidates.isEmpty()) return ObserveResult(askedToSave = asked)
+        // If storage fails the result says so ("failed"), so nothing is ever reported as saved when it was not.
+        val r = safe(ObserveResult(failed = true)) { s ->
             var r = ObserveResult()
             for (c in candidates) r = applyCandidate(s, c).let { add(r, it) }
             publish(s)
             r
         }
+        return r.copy(askedToSave = asked)
     }
 
     private fun add(a: ObserveResult, b: ObserveResult) =
-        ObserveResult(a.saved + b.saved, a.updated + b.updated, a.duplicates + b.duplicates, a.proposed + b.proposed, a.blocked + b.blocked)
+        ObserveResult(a.saved + b.saved, a.updated + b.updated, a.duplicates + b.duplicates, a.proposed + b.proposed, a.blocked + b.blocked, full = a.full || b.full)
+
+    /** Writes a record and reads it straight back; a write that did not stick throws, so it can never be reported as done. */
+    private fun write(s: MemoryStorage, m: Memory) {
+        s.upsert(m)
+        val back = s.get(m.id)
+        check(back != null && back.content == m.content && back.status == m.status) { "memory write was not stored" }
+    }
 
     private fun applyCandidate(s: MemoryStorage, c: Candidate): ObserveResult {
         val all = s.all()
@@ -102,14 +124,14 @@ class MemoryService(
         }
         if (existing != null) {
             if (same(existing, c)) {
-                s.upsert(existing.copy(updatedAt = now))
+                write(s, existing.copy(updatedAt = now))
                 return ObserveResult(duplicates = 1)
             }
-            s.upsert(existing.copy(content = c.content, confidence = maxOf(existing.confidence, c.confidence), updatedAt = now))
+            write(s, existing.copy(content = c.content, confidence = maxOf(existing.confidence, c.confidence), updatedAt = now))
             return ObserveResult(updated = 1)
         }
-        if (active.size >= MemoryLimits.MAX_MEMORIES) return ObserveResult()
-        s.upsert(newMemory(c, MemorySource.AUTO, MemoryStatus.ACTIVE, now))
+        if (active.size >= MemoryLimits.MAX_MEMORIES) return ObserveResult(full = true)
+        write(s, newMemory(c, MemorySource.AUTO, MemoryStatus.ACTIVE, now))
         return ObserveResult(saved = 1)
     }
 
@@ -117,7 +139,7 @@ class MemoryService(
         val pending = all.filter { it.status == MemoryStatus.PENDING }
         if (pending.any { MemoryMatcher.similarity(it.content, c.content) >= 0.85 }) return ObserveResult(duplicates = 1)
         if (pending.size >= MemoryLimits.MAX_PENDING) return ObserveResult()
-        s.upsert(newMemory(c, MemorySource.AUTO, MemoryStatus.PENDING, now).copy(reason = reason, replacesId = replacesId))
+        write(s, newMemory(c, MemorySource.AUTO, MemoryStatus.PENDING, now).copy(reason = reason, replacesId = replacesId))
         return ObserveResult(proposed = 1)
     }
 

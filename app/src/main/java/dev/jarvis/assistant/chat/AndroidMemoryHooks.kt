@@ -1,6 +1,7 @@
 package dev.jarvis.assistant.chat
 
 import dev.jarvis.assistant.memory.MemoryService
+import dev.jarvis.assistant.memory.MemoryStatusNote
 import dev.jarvis.assistant.settings.SettingsRepository
 import kotlinx.coroutines.flow.first
 
@@ -20,7 +21,6 @@ class AndroidMemoryHooks(
     override suspend fun contextFor(recentUserTexts: List<String>): String =
         if (enabled()) service.contextFor(recentUserTexts) else ""
 
-    override suspend fun onUserMessage(text: String) {
-        if (enabled()) service.observe(text)
-    }
+    override suspend fun onUserMessage(text: String): String =
+        if (enabled()) MemoryStatusNote.of(service.observe(text)) else MemoryStatusNote.OFF
 }
