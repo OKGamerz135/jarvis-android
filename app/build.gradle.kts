@@ -68,4 +68,6 @@ dependencies {
     testImplementation(libs.junit)
     // Android's own org.json is a stub in unit tests, so tests use the real library.
     testImplementation(libs.org.json)
+    // Real SQLite for the memory database tests, so the same SQL and schema run as on the phone.
+    testImplementation(libs.sqlite.jdbc)
 }

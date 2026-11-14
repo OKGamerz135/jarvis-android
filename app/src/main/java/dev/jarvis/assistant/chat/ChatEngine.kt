@@ -46,6 +46,7 @@ class ChatEngine(
     private val storage: ChatStorage,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    private val memory: MemoryContext = NoMemory,
 ) {
     /** Adds the user's message and saves it right away, so it survives a crash or a failed request. */
     fun addUserMessage(conv: Conversation, text: String): Conversation {
@@ -68,7 +69,17 @@ class ChatEngine(
         onPartial: (String) -> Unit,
     ): GenResult {
         val history = withReminder(HistoryTrimmer.select(conv.messages, target.historyBudgetChars).messages, target.styleReminder)
-        val request = ChatRequest(target.model, target.apiKey, target.systemPrompt, history)
+        // Relevant memories are added to a COPY of the system prompt for this request only. The saved conversation and
+        // its history are never changed, and any memory failure just means "no memories", never a failed chat.
+        val extra = try {
+            memory.contextFor(conv.messages.filter { it.role == ChatRole.USER }.map { it.text })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ""
+        }
+        val system = if (extra.isBlank()) target.systemPrompt else target.systemPrompt + "\n\n" + extra
+        val request = ChatRequest(target.model, target.apiKey, system, history)
         val reply = StringBuilder()
         try {
             llm.stream(request, options).collect { chunk ->

@@ -111,6 +111,7 @@ class ChatRunner(
     private val tickMs: Long = 1000,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val trace: TraceSink = NoTrace,
+    private val memoryObserver: MemoryObserver = NoObserver,
 ) {
     private val gate = SendGate()
     private var job: Job? = null
@@ -297,6 +298,16 @@ class ChatRunner(
             if (userText != null) {
                 val withUser = withContext(io) { engine.addUserMessage(_state.value.conversation, userText) }
                 _state.update { it.copy(conversation = withUser) }
+                // Background and best-effort: remembering can never slow down or fail the reply.
+                scope.launch(io) {
+                    try {
+                        memoryObserver.onUserMessage(userText)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // ignored on purpose; memory text is never logged
+                    }
+                }
             }
             loop()
             refreshHistory()

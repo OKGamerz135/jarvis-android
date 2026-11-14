@@ -97,6 +97,8 @@ fun ChatScreen(
             }
         }
 
+        MemoryApprovalBanner()
+
         ui.failover?.let { f ->
             Card(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),
