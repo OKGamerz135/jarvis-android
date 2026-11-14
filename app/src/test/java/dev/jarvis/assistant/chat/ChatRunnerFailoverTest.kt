@@ -519,4 +519,66 @@ class ChatRunnerFailoverTest {
         assertNull(s2.temporaryProvider)
         assertNotNull(s2.problem)
     }
+
+    // ------------------------------------------------------------------ SambaNova in the chain
+
+    private class SambaFake(block: suspend kotlinx.coroutines.flow.FlowCollector<String>.(Int) -> Unit) : Fake(block)
+
+    private fun sambaFailure(status: Int, code: String, vararg h: Pair<String, String>): LlmException {
+        val body = """{"error":{"message":"m","type":"t","code":"$code"}}"""
+        val parsed = dev.jarvis.assistant.ai.SambaNovaParsing.parseFailure(status, body, h.toMap(), "m", Instant.ofEpochMilli(now))
+        return fail(parsed.error)
+    }
+
+    @Test fun sambaNovaDailyQuotaFromRealHeadersFailsOverToGroqWithTheReportedReset() = runBlocking {
+        val S = AiProvider.SAMBANOVA
+        val a = SambaFake {
+            throw sambaFailure(429, "insufficient_quota", "x-ratelimit-remaining-requests-day" to "0", "x-ratelimit-reset-requests-day" to "3600")
+        }
+        val b = GroqFake { emit("groq answer") }
+        val r = runner(FakeSource(mapOf(S to a, R to b), preferred = S))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(R, s.temporaryProvider)
+        assertEquals(ResetSource.REPORTED, ledger.record(S)!!.source)
+        assertEquals(listOf("hello", "groq answer"), s.conversation.messages.map { it.text })
+    }
+
+    @Test fun groqQuotaFailsOverToSambaNovaAndTheRequestReallyReachesItsAdapter() = runBlocking {
+        val S = AiProvider.SAMBANOVA
+        val a = GroqFake { throw quota() }
+        val c = SambaFake { emit("samba answer") }
+        val r = runner(FakeSource(mapOf(R to a, S to c), preferred = R, disabled = setOf(G)))
+        r.idle(); r.send("hello")
+        val s = r.idle()
+        assertEquals(S, s.temporaryProvider)
+        assertEquals("SambaFake", s.dispatch!!.adapter)
+        assertEquals(1, c.calls.get())
+        assertEquals(S.label, s.conversation.messages.last().provider)
+    }
+
+    @Test fun sambaNovaPerMinuteAndUnclearLimitsNeverSwitchProviders() = runBlocking {
+        val S = AiProvider.SAMBANOVA
+        for (err in listOf(
+            sambaFailure(429, "insufficient_quota", "x-ratelimit-remaining-requests" to "0", "x-ratelimit-reset-requests" to "5"),
+            sambaFailure(429, "insufficient_quota"),
+            sambaFailure(429, "queue_full"),
+        )) {
+            val g = GroqFake { emit("must not be called") }
+            val storage2 = FileChatStorage(Files.createTempDirectory("fo4").toFile())
+            val scope2 = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val ledger2 = newLedger { now }
+            val r2 = ChatRunner(
+                storage2, ChatEngine(storage2), scope2, Dispatchers.IO,
+                FakeSource(mapOf(S to SambaFake { throw err }, R to g), preferred = S).also { it.ledger = ledger2 }, ledger2, net,
+                clock = { now }, countdownSeconds = 2, tickMs = 20, maxRetries = 0,
+            )
+            r2.idle(); r2.send("hi")
+            val s2 = r2.idle()
+            scope2.cancel()
+            assertEquals(0, g.calls.get())
+            assertNull(s2.temporaryProvider)
+            assertNotNull(s2.problem)
+        }
+    }
 }

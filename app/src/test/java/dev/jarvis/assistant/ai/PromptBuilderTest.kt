@@ -112,7 +112,7 @@ class PromptBuilderTest {
     @Test
     fun levelsAreDistinctAndTheLastOneStillRequiresARealAnswer() {
         assertEquals(5, (0..4).map { prompt(it) }.toSet().size)
-        assertTrue(prompt(4).contains("Then still give the full, correct answer"))
+        assertTrue(prompt(4).contains("genuinely useful, correct answer"))
         assertTrue(prompt(3).contains("what the fuck were you thinking"))
     }
 

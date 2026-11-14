@@ -42,6 +42,7 @@ class SettingsRepository(context: Context) {
         val GROQ_MODEL = stringPreferencesKey("groq_model")
         val OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
         val CLOUDFLARE_MODEL = stringPreferencesKey("cloudflare_model")
+        val SAMBANOVA_MODEL = stringPreferencesKey("sambanova_model")
         val ACKNOWLEDGED = stringSetPreferencesKey("acknowledged_providers")
         val FAILOVER = booleanPreferencesKey("failover_enabled")
         val ORDER = stringPreferencesKey("provider_order")
@@ -69,6 +70,7 @@ class SettingsRepository(context: Context) {
                 groqModel = this[GROQ_MODEL] ?: d.groqModel,
                 openrouterModel = this[OPENROUTER_MODEL] ?: d.openrouterModel,
                 cloudflareModel = this[CLOUDFLARE_MODEL] ?: d.cloudflareModel,
+                sambanovaModel = this[SAMBANOVA_MODEL] ?: d.sambanovaModel,
                 acknowledged = (this[ACKNOWLEDGED] ?: emptySet())
                     .mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
                     .toSet(),
@@ -92,6 +94,7 @@ class SettingsRepository(context: Context) {
             this[GROQ_MODEL] = s.groqModel
             this[OPENROUTER_MODEL] = s.openrouterModel
             this[CLOUDFLARE_MODEL] = s.cloudflareModel
+            this[SAMBANOVA_MODEL] = s.sambanovaModel
             this[ACKNOWLEDGED] = s.acknowledged.map { it.name }.toSet()
             this[FAILOVER] = s.failoverEnabled
             this[ORDER] = s.providerOrder.joinToString(",") { it.name }

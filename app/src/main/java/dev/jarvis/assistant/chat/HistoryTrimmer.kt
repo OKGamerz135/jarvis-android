@@ -11,6 +11,7 @@ object ChatLimits {
         AiProvider.GEMINI -> 60_000
         AiProvider.OPENROUTER -> 24_000 // free models vary a lot in context size; stay conservative
         AiProvider.CLOUDFLARE -> 24_000 // the free allowance is counted in neurons (tokens), so keep requests modest
+        AiProvider.SAMBANOVA -> 24_000 // 200,000 tokens a day and only 20 requests: modest requests keep the allowance useful
     }
 }
 
