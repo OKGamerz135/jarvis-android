@@ -6,11 +6,11 @@ fun interface MemoryContext {
 }
 
 /**
- * Is told about each user message so it can remember useful facts. It runs BEFORE the reply is requested and returns an
+ * Is told about each user message (and the recent messages, so corrections like "make it green" can be resolved) so it can remember useful facts. It runs BEFORE the reply is requested and returns an
  * honest status note for the AI ("saved", "awaiting approval", "nothing saved"...), or "" for none. Must never throw.
  */
 fun interface MemoryObserver {
-    suspend fun onUserMessage(text: String): String
+    suspend fun onUserMessage(text: String, recent: List<String>): String
 }
 
 object NoMemory : MemoryContext {
@@ -18,5 +18,5 @@ object NoMemory : MemoryContext {
 }
 
 object NoObserver : MemoryObserver {
-    override suspend fun onUserMessage(text: String): String = ""
+    override suspend fun onUserMessage(text: String, recent: List<String>): String = ""
 }

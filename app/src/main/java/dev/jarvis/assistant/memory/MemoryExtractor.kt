@@ -154,6 +154,31 @@ object MemoryExtractor {
         return Candidate(cat, key, sentenceCase(clean(text)), 1.0, explicit = true)
     }
 
+    private val CORRECTION_CUE = Regex(
+        """(?i)^(?:i\s+take\s+(?:it|that)\s+back|take\s+(?:it|that)\s+back|scratch\s+that|never\s*mind|i\s+meant|i\s+mean|correction|sorry|wait|no|nope|actually|oops|my\s+bad|i\s+was\s+wrong)\b[,:;!.\-\s]*(?:it'?s|it\s+is|that'?s|its|make\s+it|change\s+it\s+to|set\s+it\s+to|it\s+should\s+be|i\s+meant|i\s+mean)?\s*(?:really|actually|now|in\s+fact)?\s*(.{2,60})$""",
+    )
+    private val CORRECTION_ITS = Regex("""(?i)^(?:it'?s|it\s+is|that'?s)\s+(?:really|actually|now|in\s+fact)\s+(.{2,60})$|^(?:it'?s|it\s+is)\s+(.{2,40}?)\s+now$""")
+    private val CORRECTION_CHANGE = Regex("""(?i)^(?:change|set|switch|update)\s+(?:it|that|my\s+[a-z]+(?:\s+[a-z]+)?)\s+to\s+(.{2,60})$|^make\s+it\s+(.{2,40})$""")
+    private val CORRECTION_NOT = Regex("""(?i)^(?:it'?s|it\s+is)\s+not\s+.{1,40}?[,;]\s*(?:it'?s|it\s+is)\s+(.{2,40})$""")
+    private val NOT_A_VALUE = Regex("""(?i)^(?:i|you|we|he|she|they|that|this|what|why|how|the|thanks|thank|ok|okay|yes|yeah|sure|please)\b""")
+
+    /**
+     * A correction that refers back to something said earlier ("I take it back, it's really orange", "make it green",
+     * "it's red now"), reduced to the new value. Null if the message is not such a correction. It names no topic: the
+     * service finds which saved memory is meant from the recent conversation.
+     */
+    fun correctionValue(text: String): String? {
+        var s = text.replace('\u2019', '\'').trim().trimEnd('.', '!', '?', ' ', ',', ';').trim()
+        repeat(4) { s = s.replace(LEAD_IN, "") }
+        if (s.endsWith("?") || HEDGE.containsMatchIn(s)) return null
+        val groups = listOf(CORRECTION_NOT, CORRECTION_ITS, CORRECTION_CHANGE, CORRECTION_CUE).firstNotNullOfOrNull { re ->
+            re.matchEntire(s)?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }
+        } ?: return null
+        val value = groups.trim().trimEnd('.', '!', ',', ';').trim()
+        if (value.isEmpty() || value.split(Regex("""\s+""")).size > 4 || NOT_A_VALUE.containsMatchIn(value)) return null
+        return value
+    }
+
     /** Is this a correction of an older fact ("now", "no longer", ...)? */
     fun looksLikeCorrection(text: String): Boolean = CORRECTION.containsMatchIn(text)
 

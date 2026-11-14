@@ -21,6 +21,6 @@ class AndroidMemoryHooks(
     override suspend fun contextFor(recentUserTexts: List<String>): String =
         if (enabled()) service.contextFor(recentUserTexts) else ""
 
-    override suspend fun onUserMessage(text: String): String =
-        if (enabled()) MemoryStatusNote.of(service.observe(text)) else MemoryStatusNote.OFF
+    override suspend fun onUserMessage(text: String, recent: List<String>): String =
+        if (enabled()) MemoryStatusNote.of(service.observe(text, recent)) else MemoryStatusNote.OFF
 }

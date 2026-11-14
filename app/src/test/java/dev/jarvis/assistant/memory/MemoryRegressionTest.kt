@@ -131,4 +131,99 @@ class MemoryRegressionTest {
         assertTrue(s.memories.value.single().content.contains("blue", ignoreCase = true))
         assertNull(s.memories.value.firstOrNull { it.content.contains("orange", ignoreCase = true) })
     }
+
+    // ---- Build 26b: "OK, I take it back, it's really orange." names no topic
+
+    private val recentColourChat = listOf("My favourite colour is blue.", "Noted, sir. Blue it is.")
+
+    @Test fun takeItBackCorrectionUpdatesTheSingleRecordAndEverythingShowsOrange() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        val r = s.observe("OK, I take it back, it's really orange.", recentColourChat)
+        assertEquals(1, r.updated)
+        assertTrue(MemoryStatusNote.of(r), MemoryStatusNote.of(r).contains("UPDATED:"))
+        // The screen's flow (what the UI renders) ...
+        val ui = s.memories.value
+        assertEquals(1, ui.size)
+        assertTrue(ui.single().content, ui.single().content.contains("orange", ignoreCase = true))
+        // ... and the database file read through a brand new connection and service.
+        val db = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}")
+        val rows = JdbcSql(db).query("SELECT content FROM memories") { it.string(0) }
+        db.close()
+        assertEquals(1, rows.size)
+        assertTrue(rows.single().orEmpty(), rows.single().orEmpty().contains("orange", ignoreCase = true))
+        assertFalse(rows.single().orEmpty().contains("blue", ignoreCase = true))
+        val reopened = contents(service())
+        assertEquals(1, reopened.size)
+        assertTrue(reopened.single().contains("orange", ignoreCase = true))
+    }
+
+    @Test fun otherPhrasingsOfTheSameCorrectionWork() = runBlocking {
+        for (t in listOf("make it green", "it's green now", "I meant green", "No, it's green", "Actually it's really green", "change it to green", "scratch that, green")) {
+            val s = MemoryService({ InMemoryMemoryStorage() }, io = Dispatchers.Unconfined)
+            s.observe("My favourite colour is blue.")
+            val r = s.observe(t, recentColourChat)
+            assertEquals(t, 1, r.updated)
+            assertTrue(t, s.memories.value.single().content.contains("green", ignoreCase = true))
+        }
+    }
+
+    @Test fun aCorrectionWithNoMatchingTopicChangesNothingAndSaysSo() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        val r = s.observe("OK, I take it back, it's really orange.", listOf("What's the weather like?", "Sunny."))
+        assertEquals(0, r.updated)
+        assertTrue(r.correctionAsked)
+        val note = MemoryStatusNote.of(r)
+        assertTrue(note, note.contains("NOT UPDATED"))
+        assertFalse(note.replace("NOT UPDATED:", "").contains("UPDATED:"))
+        assertTrue(contents(service()).single().contains("blue", ignoreCase = true))
+    }
+
+    @Test fun anAmbiguousCorrectionIsNeverGuessed() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        s.observe("My favourite food is pizza.")
+        val r = s.observe("I take it back, it's really orange", listOf("My favourite colour is blue.", "My favourite food is pizza."))
+        assertEquals(0, r.updated)
+        assertEquals(setOf("Favourite colour is blue", "Favourite food is pizza"), contents(s).toSet())
+    }
+
+    @Test fun onlyTheTopicOfTheRecentChatIsChanged() = runBlocking {
+        val s = service()
+        s.observe("My phone is an iQOO 13")
+        s.observe("My favourite colour is blue.")
+        s.observe("I take it back, it's really orange", recentColourChat)
+        val c = contents(s)
+        assertTrue(c.any { it.contains("iQOO 13") })
+        assertTrue(c.any { it.contains("orange", ignoreCase = true) })
+        assertEquals(2, c.size)
+    }
+
+    @Test fun aBlockedCorrectionIsRefusedNotApplied() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        val r = s.observe("I meant 4111 1111 1111 1111", recentColourChat)
+        assertEquals(0, r.updated)
+        assertTrue(contents(s).single().contains("blue", ignoreCase = true))
+    }
+
+    @Test fun correctionValueOnlyMatchesRealCorrections() {
+        assertEquals("orange", MemoryExtractor.correctionValue("OK, I take it back, it's really orange."))
+        assertEquals("green", MemoryExtractor.correctionValue("make it green"))
+        for (t in listOf("It's raining outside", "No thanks", "Actually I love tea", "what is it really?", "it's really nice to meet you today", "I think it's really orange")) {
+            assertNull(t, MemoryExtractor.correctionValue(t))
+        }
+    }
+
+    @Test fun aBrokenDatabaseNeverReportsACorrectionAsDone() = runBlocking {
+        val base = InMemoryMemoryStorage()
+        base.upsert(Memory("a", MemoryCategory.FAVOURITE, "favourite colour", "Favourite colour is blue", MemorySource.AUTO, 0.75, MemoryStatus.ACTIVE, 1, 1))
+        val lossy = object : MemoryStorage by base {
+            override fun upsert(m: Memory) { /* write silently lost */ }
+        }
+        val r = MemoryService({ lossy }, io = Dispatchers.Unconfined).observe("I take it back, it's really orange", recentColourChat)
+        assertTrue(r.failed)
+        assertFalse(MemoryStatusNote.of(r).contains("UPDATED:"))
+    }
 }

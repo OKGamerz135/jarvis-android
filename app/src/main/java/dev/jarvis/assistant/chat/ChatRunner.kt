@@ -300,6 +300,7 @@ class ChatRunner(
     private suspend fun runGeneration(userText: String?) {
         try {
             if (userText != null) {
+                val recent = _state.value.conversation.messages.takeLast(4).map { it.text }
                 val withUser = withContext(io) { engine.addUserMessage(_state.value.conversation, userText) }
                 _state.update { it.copy(conversation = withUser) }
                 // Remembering happens BEFORE the reply is requested, so the reply is based on what really happened:
@@ -307,7 +308,7 @@ class ChatRunner(
                 // by a timeout and can never fail the chat.
                 memoryNote = withContext(io) {
                     try {
-                        withTimeoutOrNull(MEMORY_TIMEOUT_MS) { memoryObserver.onUserMessage(userText) } ?: MemoryStatusNote.UNKNOWN
+                        withTimeoutOrNull(MEMORY_TIMEOUT_MS) { memoryObserver.onUserMessage(userText, recent) } ?: MemoryStatusNote.UNKNOWN
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {

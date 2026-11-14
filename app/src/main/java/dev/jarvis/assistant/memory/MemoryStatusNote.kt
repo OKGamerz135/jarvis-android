@@ -37,6 +37,11 @@ object MemoryStatusNote {
                     "never will be. Tell the user that, and advise against sharing secrets."
             }
             if (r.full) lines += "NOT SAVED: the memory is full. Tell the user to delete some memories in Settings, Memory."
+            if (lines.isEmpty() && r.correctionAsked) {
+                lines += "NOT UPDATED: the user seems to be correcting something you remember, but it could not be matched to " +
+                    "one saved memory, so NOTHING was changed. Say it was NOT updated, and ask them to say it in full, for example " +
+                    "\"My favourite colour is orange\". Do not act as if the correction was stored."
+            }
             if (lines.isEmpty()) {
                 lines += if (r.askedToSave) {
                     "NOT SAVED: the user asked you to remember something but nothing could be stored (it was not clear what to " +

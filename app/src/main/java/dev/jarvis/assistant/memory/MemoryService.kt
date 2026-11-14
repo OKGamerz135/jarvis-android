@@ -32,6 +32,8 @@ data class ObserveResult(
     val askedToSave: Boolean = false,
     /** The memory limit was reached, so a new fact could not be added. */
     val full: Boolean = false,
+    /** The user seems to be correcting a remembered fact, whether or not it could be applied. */
+    val correctionAsked: Boolean = false,
 )
 
 /**
@@ -78,10 +80,16 @@ class MemoryService(
     // ------------------------------------------------------------------ automatic extraction
 
     /** Looks at one user message and saves, updates or proposes memories. Never throws. */
-    suspend fun observe(userText: String): ObserveResult {
+    suspend fun observe(userText: String, recent: List<String> = emptyList()): ObserveResult {
         val asked = MemoryExtractor.asksToSave(userText)
         val candidates = MemoryExtractor.extract(userText)
-        if (candidates.isEmpty()) return ObserveResult(askedToSave = asked)
+        if (candidates.isEmpty()) {
+            // "I take it back, it's really orange" says no topic: it corrects whatever the conversation was just about.
+            val value = MemoryExtractor.correctionValue(userText)
+                ?: return ObserveResult(askedToSave = asked)
+            val r = safe(ObserveResult(failed = true)) { s -> applyCorrection(s, value, recent).also { publish(s) } }
+            return r.copy(askedToSave = asked, correctionAsked = true)
+        }
         // If storage fails the result says so ("failed"), so nothing is ever reported as saved when it was not.
         val r = safe(ObserveResult(failed = true)) { s ->
             var r = ObserveResult()
@@ -94,6 +102,32 @@ class MemoryService(
 
     private fun add(a: ObserveResult, b: ObserveResult) =
         ObserveResult(a.saved + b.saved, a.updated + b.updated, a.duplicates + b.duplicates, a.proposed + b.proposed, a.blocked + b.blocked, full = a.full || b.full)
+
+    /**
+     * Applies a topic-less correction to the ONE saved memory the recent conversation is about. Only memories whose
+     * sentence can be rebuilt with the new value are changed (favourites and devices). If no single memory clearly matches,
+     * nothing is touched and the result says so; a guess is never written.
+     */
+    private fun applyCorrection(s: MemoryStorage, value: String, recent: List<String>): ObserveResult {
+        val words = recent.takeLast(6).flatMap { MemoryMatcher.tokens(it) }.toSet()
+        val candidates = s.all()
+            .filter { it.status == MemoryStatus.ACTIVE && it.key != null && (it.category == MemoryCategory.FAVOURITE || it.category == MemoryCategory.TECH) }
+            .map { it to MemoryMatcher.score(it, words) }
+            .filter { it.second >= MIN_SCORE }
+            .sortedByDescending { it.second }
+        val best = candidates.firstOrNull() ?: return ObserveResult()
+        if (candidates.size > 1 && candidates[1].second >= best.second) return ObserveResult() // ambiguous: do not guess
+        val old = best.first
+        val key = old.key!!
+        val content = when (old.category) {
+            MemoryCategory.FAVOURITE -> "${key.replaceFirstChar { it.uppercase() }} is $value"
+            else -> "Their ${key.removePrefix("my ")} is $value"
+        }.take(MemoryLimits.MAX_CONTENT_CHARS)
+        if (SensitivityGuard.check(content).level != Sensitivity.OK) return ObserveResult(blocked = 1)
+        if (content.equals(old.content, ignoreCase = true)) return ObserveResult(duplicates = 1)
+        write(s, old.copy(content = content, confidence = 1.0, updatedAt = clock()))
+        return ObserveResult(updated = 1)
+    }
 
     /** Writes a record and reads it straight back; a write that did not stick throws, so it can never be reported as done. */
     private fun write(s: MemoryStorage, m: Memory) {
