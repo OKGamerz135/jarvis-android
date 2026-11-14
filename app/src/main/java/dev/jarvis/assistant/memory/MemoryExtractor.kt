@@ -14,8 +14,22 @@ object MemoryExtractor {
     private val HEDGE = Regex("""(?i)\b(maybe|might|probably|perhaps|possibly|i think|i guess|i suppose|not sure|sometimes|kind of|sort of|i wonder|could be)\b""")
     private val CORRECTION = Regex("""(?i)\b(now|actually|anymore|any more|no longer|changed|switched|instead)\b""")
 
-    private val EXPLICIT = Regex("""(?i)^(?:please\s+)?(?:remember|note|keep in mind|don't forget|dont forget)(?:\s+that)?\s*[:,]?\s+(.{4,})$""")
-    private val FAVOURITE = Regex("""(?i)^my\s+(?:all[- ]time\s+)?favou?rite\s+([a-z][a-z \-]{1,30}?)\s+(?:is|are|was)\s+(?:now\s+)?(.{1,100})$""")
+    private val VAGUE = setOf("thing", "things", "stuff", "something", "anything", "everything", "one", "this", "that", "it")
+    private val VAGUE_TOKENS by lazy { MemoryMatcher.tokens(VAGUE.joinToString(" ")) }
+    private val ASK = """(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"""
+    /** "remember that ...", "note that ...", "don't forget ...". */
+    private val EXPLICIT = Regex("""(?i)^$ASK(?:remember|note(?:\s+down)?|keep in mind|don't forget|dont forget)(?:\s+that)?\s*[:,]?\s+(.{4,})$""")
+    /** "save this in memory that ...", "store that to memory: ...", "add it to your memory ...". The memory words are required. */
+    private val EXPLICIT_SAVE = Regex(
+        """(?i)^$ASK(?:save|store|add|put|write(?:\s+down)?|log|keep|memori[sz]e)(?:\s+(?:this|that|it))?(?:\s+(?:in|into|to|on))?(?:\s+(?:your|my|the))?\s+(?:long[- ]term\s+)?(?:memory|memories)(?:\s+(?:that|:))?\s*[:,\-]?\s*(.{4,})$""",
+    )
+    private val SAVE_INTENT = Regex("""(?i)\b(remember|save|store|memori[sz]e|note (?:this|that|down)|don't forget|dont forget|keep (?:this |that )?in mind)\b""")
+    private val ASKING_TO = Regex("""(?i)^(?:(?:can|could|would|will)\s+you|please)\b""")
+    private val LEAD_IN = Regex("""(?i)^(?:hey|hi|hello|ok|okay|so|well|and|but|also|btw|by the way|you know(?: what)?|just so you know|fyi|oh|listen|look|jarvis|sir)\b[,:!]?\s+""")
+    private val HAVE = Regex("""(?i)^i(?:'ve|\s+have|\s+own|\s+got)\s+(?:got\s+)?(.{2,100})$""")
+    private val AM = Regex("""(?i)^i(?:'m|\s+am)\s+(.{3,100})$""")
+    private val PHONE_BRANDS = Regex("""(?i)\b(iqoo|iphone|pixel|galaxy|oneplus|redmi|poco|realme|vivo|oppo|xiaomi|motorola|moto|nothing phone|samsung)\b""")
+    private val FAVOURITE = Regex("""(?i)^my\s+(?:all[- ]time\s+)?fav(?:ou?rite)?\s+([a-z][a-z \-]{1,30}?)\s+(?:is|are|was)\s+(?:now\s+)?(.{1,100})$""")
     private val TECH = Regex(
         """(?i)^my\s+(phone|laptop|pc|computer|tablet|watch|tv|router|car|bike|setup|os|editor|ide|keyboard|mouse|monitor|headphones|earbuds|console)\s+(?:is|are)\s+(?:now\s+)?(?:an?\s+|the\s+)?(.{2,100})$""",
     )
@@ -33,27 +47,40 @@ object MemoryExtractor {
         for (raw in text.replace('\u2019', '\'').split(SENTENCE_SPLIT)) {
             val s = raw.trim().trim('"', '\'', '`').trimEnd('.', '!', ',', ';').trim()
             if (s.length < 8 || s.length > 260) continue
-            if (s.endsWith("?")) continue
             candidateFor(s)?.let { out += it }
         }
         return out
     }
 
+    /** Did the user ask JARVIS to remember something (as opposed to asking whether it remembers)? */
+    fun asksToSave(text: String): Boolean {
+        val t = text.replace('\u2019', '\'').trim()
+        if (!SAVE_INTENT.containsMatchIn(t)) return false
+        return !t.endsWith("?") || ASKING_TO.containsMatchIn(t.replace(LEAD_IN, ""))
+    }
+
     private val HEDGE_LEAD = Regex("""(?i)^(?:i think|i guess|i suppose|i believe|maybe|probably|perhaps)[, ]+(?:that\s+)?""")
     private val HEDGE_TAIL = Regex("""(?i)[, ]+(?:maybe|probably|perhaps|i think|i guess)$""")
 
-    private fun candidateFor(original: String): Candidate? {
+    private fun candidateFor(original: String, explicitDepth: Int = 0): Candidate? {
+        val question = original.endsWith("?")
         val uncertain = HEDGE.containsMatchIn(original)
-        // The hedge is remembered as "uncertain"; the sentence is matched without it so the patterns still apply.
-        val s = original.replace(HEDGE_LEAD, "").replace(HEDGE_TAIL, "").trim()
+        // Chatty openers ("you know what", "btw") and hedges are removed so the patterns still apply; the hedge is
+        // remembered as "uncertain".
+        var s = original.trimEnd('?', ' ').trim()
+        repeat(4) { s = s.replace(LEAD_IN, "") }
+        s = s.replace(HEDGE_LEAD, "").replace(HEDGE_TAIL, "").trim()
         val conf = if (uncertain) 0.4 else 0.75
 
-        EXPLICIT.matchEntire(s)?.let { m ->
-            val body = clean(m.groupValues[1])
-            if (body.length < 4) return null
-            val (cat, key) = infer(body)
-            return Candidate(cat, key, sentenceCase(body), if (uncertain) 0.5 else 1.0, uncertain = false, explicit = true)
+        if (explicitDepth == 0) {
+            val m = EXPLICIT_SAVE.matchEntire(s) ?: EXPLICIT.matchEntire(s)
+            if (m != null) {
+                val body = clean(m.groupValues[1])
+                if (body.length < 4) return null
+                return explicitCandidate(body)
+            }
         }
+        if (question) return null
         if (QUESTION_START.containsMatchIn(s)) return null
         if (TEMPORARY.containsMatchIn(s)) return null
 
@@ -101,6 +128,30 @@ object MemoryExtractor {
             return Candidate(MemoryCategory.PREFERENCE, "feeling about ${obj.lowercase()}", text, conf, uncertain)
         }
         return null
+    }
+
+    /**
+     * The user said "remember/save ... that X". Treated as a normal statement first (so "remember that my favourite colour is
+     * blue" updates the same record a plain statement would); otherwise X is stored as a first-person fact, rephrased.
+     */
+    private fun explicitCandidate(body: String): Candidate? {
+        candidateFor(body, explicitDepth = 1)?.let { return it.copy(confidence = 1.0, uncertain = false, explicit = true) }
+        val b = body.replace('\u2019', '\'').trim()
+        // Too vague to be worth keeping ("the thing", "it"): better to say nothing was saved than to store junk.
+        val meaningful = MemoryMatcher.tokens(b) - VAGUE_TOKENS
+        if (meaningful.isEmpty()) return null
+        HAVE.matchEntire(b)?.let { m ->
+            val what = clean(m.groupValues[1])
+            val isPhone = PHONE_BRANDS.containsMatchIn(what) && what.split(' ').size <= 4
+            val cat = if (isPhone || infer(b).first == MemoryCategory.TECH) MemoryCategory.TECH else MemoryCategory.OTHER
+            return Candidate(cat, if (isPhone) "my phone" else null, sentenceCase("has $what"), 1.0, explicit = true)
+        }
+        AM.matchEntire(b)?.let { m ->
+            return Candidate(infer(b).first, null, sentenceCase("is ${clean(m.groupValues[1])}"), 1.0, explicit = true)
+        }
+        val (cat, key) = infer(b)
+        val text = if (b.startsWith("my ", ignoreCase = true)) "Their " + b.drop(3) else b
+        return Candidate(cat, key, sentenceCase(clean(text)), 1.0, explicit = true)
     }
 
     /** Is this a correction of an older fact ("now", "no longer", ...)? */

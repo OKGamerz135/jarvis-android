@@ -55,6 +55,8 @@ fun MemoryScreen(
     var editing by remember { mutableStateOf<Memory?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refresh() }
+
     val pending = all.filter { it.status == MemoryStatus.PENDING }
     val active = all.filter { it.status == MemoryStatus.ACTIVE }
 
