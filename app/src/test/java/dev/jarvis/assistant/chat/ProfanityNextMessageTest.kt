@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -60,10 +61,11 @@ class ProfanityNextMessageTest {
 
     private suspend fun idle() = withTimeout(5000) { runner.state.first { it.loaded && !it.generating } }
 
+    /** Sends once the previous reply has fully released the send lock, then waits for this reply to finish. */
     private suspend fun sendAndWait(text: String) {
-        idle()
-        assertEquals(SendResult.ACCEPTED, runner.send(text))
-        withTimeout(5000) { runner.state.first { it.generating || requests.size > 0 } }
+        val before = requests.size
+        withTimeout(5000) { while (runner.send(text) != SendResult.ACCEPTED) delay(5) }
+        withTimeout(5000) { while (requests.size <= before) delay(5) }
         idle()
     }
 

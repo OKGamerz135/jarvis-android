@@ -13,7 +13,6 @@ class ProviderReliabilityTest {
     fun aReadTimeoutIsAProviderTimeoutNotOffline() {
         val e = ioFailure(SocketTimeoutException("Read timed out"))
         assertTrue(e is LlmError.Timeout)
-        assertFalse(ErrorMessages.of(e).contains("internet"))
         assertTrue(ErrorMessages.of(e).contains("not your internet"))
     }
 
