@@ -151,7 +151,7 @@ class GeminiProvider(
         } catch (e: IOException) {
             // A cancelled request closes its own socket; that is not a network failure.
             currentCoroutineContext().ensureActive()
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -171,7 +171,7 @@ class GeminiProvider(
             call.ok(status)
             info
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -200,7 +200,7 @@ class GeminiProvider(
             call.ok(status)
             text
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -248,7 +248,7 @@ object Providers {
     private val groq = GroqProvider(DiagnosticsLog)
     private val openRouter = OpenRouterProvider(DiagnosticsLog)
     private val cloudflare = CloudflareProvider(DiagnosticsLog)
-    private val sambanova = SambaNovaProvider(DiagnosticsLog)
+    private val zai = ZaiProvider(DiagnosticsLog)
 
     fun openRouter(): OpenRouterProvider = openRouter
 
@@ -257,7 +257,7 @@ object Providers {
         AiProvider.GROQ -> groq
         AiProvider.OPENROUTER -> openRouter
         AiProvider.CLOUDFLARE -> cloudflare
-        AiProvider.SAMBANOVA -> sambanova
+        AiProvider.ZAI -> zai
     }
 
     fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics = when (provider) {
@@ -265,6 +265,6 @@ object Providers {
         AiProvider.GROQ -> groq
         AiProvider.OPENROUTER -> openRouter
         AiProvider.CLOUDFLARE -> cloudflare
-        AiProvider.SAMBANOVA -> sambanova
+        AiProvider.ZAI -> zai
     }
 }

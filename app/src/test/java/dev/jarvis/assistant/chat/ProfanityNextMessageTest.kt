@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -47,7 +48,7 @@ class ProfanityNextMessageTest {
     private inner class LiveSettingsSource : ProviderSource {
         override suspend fun resolve(provider: AiProvider?): Resolved {
             val p = provider ?: AiProvider.GROQ
-            return Resolved.Ready(ChatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(settings)), llm)
+            return Resolved.Ready(ChatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(settings), PromptBuilder.styleReminder(settings)), llm)
         }
 
         override suspend fun snapshot() = ProviderSnapshot(
@@ -60,10 +61,11 @@ class ProfanityNextMessageTest {
 
     private suspend fun idle() = withTimeout(5000) { runner.state.first { it.loaded && !it.generating } }
 
+    /** Sends once the previous reply has fully released the send lock, then waits for this reply to finish. */
     private suspend fun sendAndWait(text: String) {
-        idle()
-        assertEquals(SendResult.ACCEPTED, runner.send(text))
-        withTimeout(5000) { runner.state.first { it.generating || requests.size > 0 } }
+        val before = requests.size
+        withTimeout(5000) { while (runner.send(text) != SendResult.ACCEPTED) delay(5) }
+        withTimeout(5000) { while (requests.size <= before) delay(5) }
         idle()
     }
 
@@ -103,5 +105,47 @@ class ProfanityNextMessageTest {
         assertFalse(requests[2].systemPrompt.contains("Unhinged"))
         // the old conversation's history never injects a system prompt of its own
         assertTrue(requests.all { r -> r.messages.none { it.text.contains("Profanity and") } })
+    }
+
+    @Test
+    fun theReminderTracksTheSliderOnTheNewestUserMessageOnlyAndIsNeverSaved() = runBlocking {
+        settings = settings.copy(profanity = 4)
+        sendAndWait("first")
+        sendAndWait("second")
+        val last = requests[1].messages.last()
+        assertTrue(last.text.startsWith("second"))
+        assertTrue(last.text.contains("level 4 (Unhinged)"))
+        // the earlier user message carries no note
+        assertFalse(requests[1].messages.first().text.contains("App note"))
+        // switching the slider changes the note on the very next message; level 0 removes it
+        settings = settings.copy(profanity = 2)
+        sendAndWait("third")
+        assertTrue(requests[2].messages.last().text.contains("level 2 (Casual)"))
+        settings = settings.copy(profanity = 0)
+        sendAndWait("fourth")
+        assertFalse(requests[3].messages.last().text.contains("App note"))
+        // nothing is stored in the conversation
+        val stored = runner.state.first { it.loaded }.conversation.messages
+        assertTrue(stored.none { it.text.contains("App note") })
+        assertEquals(listOf("first", "second", "third", "fourth"), stored.filter { it.role == dev.jarvis.assistant.ai.ChatRole.USER }.map { it.text })
+    }
+
+    @Test
+    fun everyProviderReceivesTheSamePersonalityInstructionsFromTheEngine() = runBlocking {
+        val s = JarvisSettings(profanity = 3)
+        val seen = mutableMapOf<AiProvider, ChatRequest>()
+        val engine = ChatEngine(storage)
+        for (p in AiProvider.entries) {
+            val conv = engine.addUserMessage(Conversation.empty("c-${p.name}", 1L), "hello there")
+            val rec = object : LlmProvider {
+                override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow { seen[p] = request; emit("ok") }
+            }
+            val target = ChatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(s), PromptBuilder.styleReminder(s))
+            engine.generate(conv, target, rec, CallOptions()) {}
+        }
+        assertEquals(AiProvider.entries.size, seen.size)
+        assertEquals(1, seen.values.map { it.systemPrompt }.toSet().size)
+        assertEquals(1, seen.values.map { it.messages.last().text }.toSet().size)
+        assertTrue(seen.values.first().messages.last().text.contains("level 3 (Savage)"))
     }
 }

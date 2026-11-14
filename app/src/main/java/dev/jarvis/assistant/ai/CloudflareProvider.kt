@@ -180,7 +180,7 @@ class CloudflareProvider(
         } catch (e: IOException) {
             // A cancelled request closes its own socket; that is not a network failure.
             currentCoroutineContext().ensureActive()
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -210,7 +210,7 @@ class CloudflareProvider(
             call.ok(status, if (seen) "model listed" else "token accepted; model not on the first page of the catalog")
             ModelInfo(model, null, listOf("chat.completions"))
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -239,7 +239,7 @@ class CloudflareProvider(
                     throw call.failed(status, null, "no text returned", LlmError.Blocked("the model returned no text"))
             }
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }

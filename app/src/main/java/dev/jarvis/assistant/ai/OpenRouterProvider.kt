@@ -130,7 +130,7 @@ class OpenRouterProvider(
             call.ok(status)
             text
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -149,7 +149,7 @@ class OpenRouterProvider(
             call.ok(status, "free requests used ${q.used} of ${q.limit}")
             q
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -235,7 +235,7 @@ class OpenRouterProvider(
         } catch (e: IOException) {
             // A cancelled request closes its own socket; that is not a network failure.
             currentCoroutineContext().ensureActive()
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -306,7 +306,7 @@ class OpenRouterProvider(
                     throw call.failed(status, null, "no text returned", LlmError.Blocked("the model returned no text"))
             }
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }

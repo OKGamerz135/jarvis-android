@@ -40,6 +40,7 @@ class AndroidProviderSource(
             model = settings.modelOf(p),
             apiKey = key,
             systemPrompt = PromptBuilder.build(settings),
+            styleReminder = PromptBuilder.styleReminder(settings),
         )
         return Resolved.Ready(target, Providers.forProvider(p))
     }

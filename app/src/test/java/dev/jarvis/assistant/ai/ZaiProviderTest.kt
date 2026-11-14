@@ -16,14 +16,14 @@ import java.net.ServerSocket
 import java.net.SocketException
 import java.util.concurrent.CopyOnWriteArrayList
 
-class SambaNovaProviderTest {
+class ZaiProviderTest {
     private class Hit(val method: String, val uri: String, val auth: String?, val body: String)
 
     private lateinit var server: ServerSocket
     private val hits = CopyOnWriteArrayList<Hit>()
     private val entries = CopyOnWriteArrayList<DiagnosticEntry>()
     private val sleeps = CopyOnWriteArrayList<Long>()
-    private val key = "sn-FAKEKEYFORTESTING1234567890abcdefgh"
+    private val key = "zai-FAKEKEYFORTESTING1234567890abcdefgh"
 
     @Volatile private var status = 200
     @Volatile private var body = ""
@@ -79,29 +79,26 @@ class SambaNovaProviderTest {
     @After
     fun stop() = server.close()
 
-    private fun provider() = SambaNovaProvider(
+    private fun provider() = ZaiProvider(
         sink = object : DiagnosticsSink { override fun record(entry: DiagnosticEntry) { entries += entry } },
         baseUrl = "http://127.0.0.1:${server.localPort}",
         sleeper = { sleeps += it },
-        clock = { java.time.Instant.parse("2026-11-14T10:00:00Z") },
     )
 
-    private val model = "Meta-Llama-3.3-70B-Instruct"
-    private fun request() = ChatRequest(model, key, "sys SECRET-PROMPT", listOf(ChatMessage(ChatRole.USER, "my private message")))
+    private val model = "glm-4.7-flash"
+    private fun request(m: String = model) = ChatRequest(m, key, "sys SECRET-PROMPT", listOf(ChatMessage(ChatRole.USER, "my private message")))
 
-    private fun collect(options: CallOptions): LlmException? = try {
-        runBlocking { provider().stream(request(), options).toList() }
+    private fun collect(options: CallOptions, m: String = model): LlmException? = try {
+        runBlocking { provider().stream(request(m), options).toList() }
         null
     } catch (e: LlmException) {
         e
     }
 
     @Test
-    fun streamsDeltaContentToTheDocumentedEndpointWithBearerKeyAndLogsLimits() {
+    fun streamsDeltaContentToTheDocumentedEndpointWithBearerKey() {
         contentType = "text/event-stream"
-        extraHeaders = "x-ratelimit-limit-requests: 20\r\nx-ratelimit-remaining-requests: 19\r\n" +
-            "x-ratelimit-limit-requests-day: 20\r\nx-ratelimit-remaining-requests-day: 7\r\n"
-        body = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+        body = "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n" +
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" +
             "data: {\"choices\":[{\"delta\":{\"content\":\", sir.\"}}]}\n\n" +
             "data: [DONE]\n\n"
@@ -109,62 +106,88 @@ class SambaNovaProviderTest {
         assertEquals("Hello, sir.", out.joinToString(""))
         assertEquals(1, hits.size)
         assertEquals("POST", hits[0].method)
-        assertEquals("/v1/chat/completions", hits[0].uri)
+        assertEquals("/api/paas/v4/chat/completions", hits[0].uri)
         assertEquals("Bearer $key", hits[0].auth)
         assertTrue(hits[0].body.contains("\"stream\":true"))
+        assertTrue(hits[0].body.contains("\"thinking\":{\"type\":\"disabled\"}"))
         assertTrue(hits[0].body.contains("sys SECRET-PROMPT"))
-        val note = entries.single().message!!
-        assertTrue(note, note.contains("per day 20 (left 7)") && note.contains("per minute 20 (left 19)"))
     }
 
     @Test
-    fun theSliderPromptIsInTheBodySentToSambaNova() {
+    fun theSliderPromptAndReminderReachZai() {
         contentType = "text/event-stream"
         body = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"
-        val prompt = dev.jarvis.assistant.ai.PromptBuilder.build(dev.jarvis.assistant.settings.JarvisSettings(profanity = 4))
-        runBlocking { provider().stream(ChatRequest(model, key, prompt, listOf(ChatMessage(ChatRole.USER, "hi"))), CallOptions()).toList() }
-        val sent = org.json.JSONObject(hits[0].body).getJSONArray("messages").getJSONObject(0).getString("content")
-        assertEquals(prompt, sent)
-        assertTrue(sent.contains("level 4 of 4 (Unhinged)"))
+        val s = dev.jarvis.assistant.settings.JarvisSettings(profanity = 4)
+        val prompt = PromptBuilder.build(s)
+        val msg = "hi\n\n" + PromptBuilder.styleReminder(s)
+        runBlocking { provider().stream(ChatRequest(model, key, prompt, listOf(ChatMessage(ChatRole.USER, msg))), CallOptions()).toList() }
+        val messages = org.json.JSONObject(hits[0].body).getJSONArray("messages")
+        assertEquals(prompt, messages.getJSONObject(0).getString("content"))
+        assertTrue(messages.getJSONObject(1).getString("content").contains("level 4 (Unhinged)"))
     }
 
     @Test
-    fun dailyQuotaIsTypedWithTheReportedResetAndNeverRetried() {
+    fun aPaidModelIsRefusedBeforeAnyRequestIsMade() {
+        for (paid in listOf("glm-5", "glm-4.7", "")) {
+            val e = collect(CallOptions(), paid)!!
+            assertTrue(paid, e.error is LlmError.Unsupported)
+        }
+        assertEquals(0, hits.size)
+        try {
+            runBlocking { provider().checkModel(key, "glm-5") }
+            throw AssertionError("expected exception")
+        } catch (e: LlmException) {
+            assertTrue(e.error is LlmError.Unsupported)
+        }
+        try {
+            runBlocking { provider().generateOnce(request("glm-5")) }
+            throw AssertionError("expected exception")
+        } catch (e: LlmException) {
+            assertTrue(e.error is LlmError.Unsupported)
+        }
+        assertEquals(0, hits.size)
+    }
+
+    @Test
+    fun checkingAFreeModelSendsNothing() {
+        val info = runBlocking { provider().checkModel(key, "glm-4.5-flash") }
+        assertTrue(info.canGenerate)
+        assertEquals(0, hits.size)
+    }
+
+    @Test
+    fun insufficientBalanceIsReportedAsBillingRequiredAndNeverRetried() {
         status = 429
-        body = """{"error":{"message":"rate limit","type":"x","code":"insufficient_quota"}}"""
-        extraHeaders = "x-ratelimit-remaining-requests-day: 0\r\nx-ratelimit-reset-requests-day: 5400\r\n"
+        body = """{"error":{"code":"1113","message":"Insufficient balance or no resource package."}}"""
         val e = collect(CallOptions(maxRetries = 2))!!
-        val q = e.error as LlmError.QuotaExhausted
-        assertEquals(java.time.Instant.parse("2026-11-14T11:30:00Z"), q.resetAt)
-        assertEquals(ResetSource.REPORTED, q.resetSource)
+        assertTrue(e.error is LlmError.BillingRequired)
         assertEquals(1, hits.size)
+        assertEquals("1113", e.context!!.apiStatus)
         assertEquals(model, e.context!!.model)
-        assertTrue(e.context!!.endpoint.endsWith("/v1/chat/completions"))
+        assertTrue(e.context!!.endpoint.endsWith("/api/paas/v4/chat/completions"))
     }
 
     @Test
-    fun perMinuteLimitUnclear429AndAuthErrorsAreNeverRetried() {
+    fun rateLimitUnclear429AndAuthErrorsAreNeverRetried() {
         status = 429
-        body = """{"error":{"message":"slow down","type":"x","code":"insufficient_quota"}}"""
-        extraHeaders = "x-ratelimit-remaining-requests: 0\r\nx-ratelimit-reset-requests: 9\r\nx-ratelimit-remaining-requests-day: 5\r\n"
-        assertEquals(LlmError.RateLimited(9), collect(CallOptions(maxRetries = 2))!!.error)
+        body = """{"error":{"code":"1302","message":"too fast"}}"""
+        assertTrue(collect(CallOptions(maxRetries = 2))!!.error is LlmError.RateLimited)
         assertEquals(1, hits.size)
-
-        hits.clear(); extraHeaders = ""
+        hits.clear()
+        body = """{"error":{"code":"7","message":"?"}}"""
         assertTrue(collect(CallOptions(maxRetries = 2))!!.error is LlmError.Unclear429)
         assertEquals(1, hits.size)
-
         hits.clear()
         status = 401
-        body = """{"error":{"message":"bad key","type":"x","code":"invalid_authentication"}}"""
+        body = """{"error":{"code":"1000","message":"auth failed"}}"""
         assertEquals(LlmError.InvalidKey, collect(CallOptions(maxRetries = 2))!!.error)
         assertEquals(1, hits.size)
     }
 
     @Test
     fun overloadedIsRetriedWithBackoffUpToTheLimit() {
-        status = 503
-        body = """{"error":{"message":"maintenance","type":"x","code":"maintenance"}}"""
+        status = 429
+        body = """{"error":{"code":"1305","message":"overloaded"}}"""
         val e = collect(CallOptions(maxRetries = 2))!!
         assertTrue(e.error is LlmError.Overloaded)
         assertEquals(3, hits.size)
@@ -173,10 +196,10 @@ class SambaNovaProviderTest {
 
     @Test
     fun keyIsNeverInTheUrlLogsOrErrors() {
-        status = 503
-        body = """{"error":{"message":"bad $key for me@example.com","type":"x","code":"maintenance"}}"""
+        status = 500
+        body = """{"error":{"code":"1234","message":"bad $key for me@example.com"}}"""
         val e = collect(CallOptions())!!
-        assertFalse(hits[0].uri.contains("sn-"))
+        assertFalse(hits[0].uri.contains("zai-"))
         val everything = entries.joinToString { it.toString() } + e.context + FailureFormatter.details(e.context)
         assertFalse(everything, everything.contains(key))
         assertFalse(everything, everything.contains("me@example.com"))
@@ -185,27 +208,10 @@ class SambaNovaProviderTest {
     }
 
     @Test
-    fun noTextIsReportedAsBlockedNotSuccess() {
+    fun noTextIsBlockedNotSuccess() {
         contentType = "text/event-stream"
         body = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: [DONE]\n\n"
         assertTrue(collect(CallOptions())!!.error is LlmError.Blocked)
-    }
-
-    @Test
-    fun availabilityCheckIsOneGetOfTheModelListAndUsesNoGenerationQuota() {
-        body = """{"data":[{"id":"$model"}]}"""
-        val info = runBlocking { provider().checkModel(key, model) }
-        assertTrue(info.canGenerate)
-        assertEquals("GET", hits.single().method)
-        assertEquals("/v1/models", hits.single().uri)
-        assertFalse(entries.single().kind.usesGenerationQuota)
-        body = """{"data":[{"id":"other"}]}"""
-        try {
-            runBlocking { provider().checkModel(key, model) }
-            throw AssertionError("expected exception")
-        } catch (e: LlmException) {
-            assertTrue(e.error is LlmError.ModelNotFound)
-        }
     }
 
     @Test
@@ -219,9 +225,8 @@ class SambaNovaProviderTest {
 
     @Test
     fun providerNameMatchesTheSettingsLabelAndIsWiredIn() {
-        assertEquals(dev.jarvis.assistant.settings.AiProvider.SAMBANOVA.label, SambaNovaProvider.NAME)
-        assertTrue(Providers.forProvider(dev.jarvis.assistant.settings.AiProvider.SAMBANOVA) is SambaNovaProvider)
-        assertTrue(Providers.diagnosticsFor(dev.jarvis.assistant.settings.AiProvider.SAMBANOVA) is SambaNovaProvider)
-        assertEquals("Meta-Llama-3.3-70B-Instruct", dev.jarvis.assistant.settings.AiProvider.SAMBANOVA.defaultModel)
+        assertEquals(dev.jarvis.assistant.settings.AiProvider.ZAI.label, ZaiProvider.NAME)
+        assertTrue(Providers.forProvider(dev.jarvis.assistant.settings.AiProvider.ZAI) is ZaiProvider)
+        assertTrue(Providers.diagnosticsFor(dev.jarvis.assistant.settings.AiProvider.ZAI) is ZaiProvider)
     }
 }
