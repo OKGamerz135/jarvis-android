@@ -37,6 +37,7 @@ class ProfanityLevelsTest {
                 "groq" to GroqParsing.buildBody(r, true),
                 "openrouter" to OpenRouterParsing.buildBody(r, "x:free", true),
                 "cloudflare" to CloudflareParsing.buildBody(r, true),
+                "sambanova" to SambaNovaParsing.buildBody(r, true),
             )
             for ((name, body) in bodies) {
                 val first = JSONObject(body).getJSONArray("messages").getJSONObject(0)
@@ -56,7 +57,7 @@ class ProfanityLevelsTest {
         assertTrue(prompt(1).contains("roughly every other reply"))
         assertTrue(prompt(2).contains("most replies contain at least one swear word"))
         assertTrue(prompt(3).contains("several strong swear words"))
-        assertTrue(prompt(4).contains("strong, natural profanity throughout"))
+        assertTrue(prompt(4).contains("all the way through the reply"))
         for (level in 1..3) assertFalse("level $level must not be the unhinged text", prompt(level).contains("NOT a polite assistant"))
         // unprompted roasting from level 2 up
         for (level in 2..4) assertTrue(prompt(level).contains("without being asked"))
@@ -75,14 +76,59 @@ class ProfanityLevelsTest {
     }
 
     @Test
-    fun levelFourExplicitlyDemandsFrequentStrongProfanityAndIntenseRoastsUnprompted() {
+    fun levelFourStaysIntenseButHasNoFixedOpeningAndSpreadsProfanityNaturally() {
         val p = prompt(4)
         for (needle in listOf(
-            "default voice", "NOT a polite assistant", "every reply", "strong, natural profanity throughout",
-            "outrageous", "bizarre", "creative roast", "without being asked", "unpredictable", "ALL-CAPS", "Maximum personality intensity",
+            "default voice", "NOT a polite assistant", "all the way through the reply", "not just at the start",
+            "in the middle of explanations", "motherfucker", "conversational flow, not a quota", "without being asked",
+            "bizarre", "outrageous", "creative comparisons", "Be unpredictable", "Maximum personality intensity",
+            "their assumptions, their question, their decisions or their reasoning",
         )) assertTrue("missing: $needle", p.contains(needle))
+        // variety instead of a template
+        for (needle in listOf(
+            "Vary how replies begin", "sometimes lead with the answer", "sometimes a sarcastic reaction",
+            "sometimes a short joke", "sometimes straight into the explanation",
+            "Never reuse a stock opening or catchphrase", "fill-in-the-blanks comedy template",
+        )) assertTrue("missing: $needle", p.contains(needle))
+        // no prescribed opener or shouting template anywhere
+        for (banned in listOf("WHAT THE ACTUAL", "OH GOD", "ALL-CAPS rants", "you absolute walnut", "In every reply use strong")) {
+            assertFalse("must not contain: $banned", p.contains(banned))
+        }
         assertFalse(p.contains("variety matters more than volume"))
-        assertFalse(p.contains("Don't swear in every sentence"))
+    }
+
+    @Test
+    fun levelThreeSpreadsProfanityAndVariesOpeningsToo() {
+        val p = prompt(3)
+        assertTrue(p.contains("throughout the whole reply"))
+        assertTrue(p.contains("not only at the start"))
+        assertTrue(p.contains("never reuse a stock opening"))
+        assertFalse(p.contains("OH GOD"))
+    }
+
+    // ------------------------------------------------------------------ response length
+
+    @Test
+    fun lengthGuidanceIsPresentAtEveryLevelAndInTheDefaultLengthSetting() {
+        for (level in 0..4) {
+            val p = prompt(level)
+            assertTrue("level $level", p.contains("Match the length to the question"))
+            assertTrue(p.contains("usually one to three short paragraphs"))
+            assertTrue(p.contains("Avoid headings and numbered sections"))
+            assertTrue(p.contains("empathy and useful support first"))
+            assertTrue(p.contains("Only complex technical or educational questions get long answers"))
+        }
+        for (level in 1..4) {
+            val p = prompt(level)
+            assertTrue(p.contains("the personality must never make an answer longer"))
+            assertTrue(p.contains("A joke replaces padding, it doesn't add to it"))
+        }
+        assertFalse(prompt(0).contains("must never make an answer longer"))
+    }
+
+    @Test
+    fun noHardCharacterLimitIsImposed() {
+        for (level in 0..4) assertFalse(Regex("""\d+\s*(characters|chars|words)""").containsMatchIn(prompt(level)))
     }
 
     // ------------------------------------------------------------------ nothing dilutes or overrides the slider

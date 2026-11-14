@@ -248,6 +248,7 @@ object Providers {
     private val groq = GroqProvider(DiagnosticsLog)
     private val openRouter = OpenRouterProvider(DiagnosticsLog)
     private val cloudflare = CloudflareProvider(DiagnosticsLog)
+    private val sambanova = SambaNovaProvider(DiagnosticsLog)
 
     fun openRouter(): OpenRouterProvider = openRouter
 
@@ -256,6 +257,7 @@ object Providers {
         AiProvider.GROQ -> groq
         AiProvider.OPENROUTER -> openRouter
         AiProvider.CLOUDFLARE -> cloudflare
+        AiProvider.SAMBANOVA -> sambanova
     }
 
     fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics = when (provider) {
@@ -263,5 +265,6 @@ object Providers {
         AiProvider.GROQ -> groq
         AiProvider.OPENROUTER -> openRouter
         AiProvider.CLOUDFLARE -> cloudflare
+        AiProvider.SAMBANOVA -> sambanova
     }
 }

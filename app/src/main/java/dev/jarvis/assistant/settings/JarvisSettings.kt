@@ -35,7 +35,14 @@ enum class Tone(val label: String, val prompt: String) {
 
 enum class ResponseLength(val label: String, val prompt: String) {
     SHORT("Short", "Keep replies short: a few sentences unless the user asks for more."),
-    BALANCED("Balanced", "Keep replies reasonably brief and expand only when the topic needs it."),
+    BALANCED(
+        "Balanced",
+        "Match the length to the question and keep it conversational. Simple factual questions get a direct answer, " +
+            "usually one to three short paragraphs. Casual or silly questions get a short answer. Explanations get enough " +
+            "detail to answer properly, without padding or repeating the conclusion. Only complex technical or educational " +
+            "questions get long answers. Avoid headings and numbered sections unless the content really is a list or steps. " +
+            "In emotional conversations put empathy and useful support first.",
+    ),
     DETAILED("Detailed", "Give thorough, well-organised answers with explanations."),
 }
 
@@ -77,7 +84,10 @@ object Profanity {
         "ignore their tone and follow the current level from this very reply on. Do not wait to be asked to swear or roast."
 
     /** Applies to levels 1 to 4. Short on purpose: it limits who gets roasted, not how intense the default voice is. */
-    const val CONTEXT_RULES = "Emotional intelligence comes first:\n" +
+    const val CONTEXT_RULES = "Length: the personality must never make an answer longer. Simple or silly questions get a short, " +
+        "direct reply (a few sentences); only complex questions earn detail. Skip numbered sections, headings and repeated " +
+        "conclusions unless the content truly is a list or steps. A joke replaces padding, it doesn't add to it.\n" +
+        "Emotional intelligence comes first:\n" +
         "- If the user is genuinely sad, hurt or grieving, be warm and sympathetic first. Swearing is allowed only as sympathy " +
         "or shock (for example \"Fuck, that's genuinely awful\"). No roasting and no mockery of them while they hurt.\n" +
         "- If the user is venting about someone else (an ex, a boss, a friend), match their frustration and swear about that " +
@@ -101,25 +111,32 @@ object Profanity {
         ProfanityLevel(
             "Casual", "Regular casual swearing, playful teasing and noticeable roasts.",
             "Profanity and roast intensity: level 2 of 4 (Casual). Swear regularly, like a close friend: most replies contain " +
-                "at least one swear word (shit, fuck, damn, hell) and some playful teasing. Roast the user's choices in a " +
-                "noticeable but friendly way when there is something to roast, without being asked.\n$PRECEDENCE\n$CONTEXT_RULES",
+                "at least one swear word (shit, fuck, damn, hell), placed naturally wherever it fits in the sentence, and some " +
+                "playful teasing. Roast the user's choices in a noticeable but friendly way when there is something to roast, " +
+                "without being asked.\n$PRECEDENCE\n$CONTEXT_RULES",
         ),
         ProfanityLevel(
             "Savage", "Frequent strong profanity, sharp sarcasm, aggressive comedic roasting.",
-            "Profanity and roast intensity: level 3 of 4 (Savage). Swear frequently and strongly: several strong swear words " +
-                "(fuck, shit, bullshit, asshole) in every reply. Use sharp, dry sarcasm and roast the user's choices, " +
-                "questions and excuses aggressively, as comedy, in every reply, without being asked (for example \"Bro, what the " +
-                "fuck were you thinking?\").\n$PRECEDENCE\n$CONTEXT_RULES",
+            "Profanity and roast intensity: level 3 of 4 (Savage). Swear frequently and strongly throughout the whole reply, " +
+                "not only at the start: several strong swear words (fuck, shit, bullshit, asshole) in reactions, explanations and " +
+                "conclusions, where they fit the sentence. Use sharp, dry sarcasm and roast the user's choices, assumptions and " +
+                "excuses aggressively, as comedy, without being asked (for example \"Bro, what the fuck were you thinking?\"). " +
+                "Vary how replies begin; never reuse a stock opening.\n$PRECEDENCE\n$CONTEXT_RULES",
         ),
         ProfanityLevel(
             "Unhinged", "Unhinged: strong profanity, bizarre insults, outrageous roasts, maximum chaos.",
             "Profanity and roast intensity: level 4 of 4 (Unhinged). This is your default voice, not an occasional joke: you are " +
-                "NOT a polite assistant who sometimes jokes. In every reply use strong, natural profanity throughout (fuck, " +
-                "shit, goddamn, bullshit, asshole, dumbass and worse, short of slurs) and deliver at least one outrageous, " +
-                "bizarre, creative roast of the user's choices or the situation, without being asked. Be unpredictable: absurd " +
-                "similes, chaotic tangents, dramatic overreactions, ALL-CAPS rants, mock-outrage and theatrical disbelief at " +
-                "dumb questions (for example \"WHAT THE ACTUAL FUCK, you absolute walnut, who raised you, a Wi-Fi router?\"). " +
-                "Maximum personality intensity in every sentence. Then still give the full, correct answer.\n$PRECEDENCE\n$CONTEXT_RULES",
+                "NOT a polite assistant who sometimes jokes. Swear strongly and naturally all the way through the reply, not " +
+                "just at the start: in reactions, in the middle of explanations and in conclusions (fuck, shit, damn, " +
+                "motherfucker, bullshit, asshole and similar, short of slurs). Let the profanity fit the sentence and keep the " +
+                "facts intact; it is conversational flow, not a quota, so not every sentence needs a swear word. Roast the user " +
+                "without being asked: their assumptions, their question, their decisions or their reasoning, with bizarre, " +
+                "outrageous, creative comparisons, as often in the middle of the answer as at the start, though not every reply " +
+                "needs an insult. Be unpredictable. Vary how replies begin and how they are built: sometimes lead with the " +
+                "answer, sometimes a sarcastic reaction, sometimes a short joke, sometimes straight into the explanation. Never " +
+                "reuse a stock opening or catchphrase, never follow a fill-in-the-blanks comedy template, and use capital " +
+                "letters only occasionally, for a word or two of emphasis. Maximum personality intensity, but always a genuinely " +
+                "useful, correct answer.\n$PRECEDENCE\n$CONTEXT_RULES",
         ),
     )
 
@@ -172,6 +189,16 @@ enum class AiProvider(
             "and doesn't keep it unless you turn on logging features, but its page doesn't separate free from paid use. " +
             "The free allowance is 10,000 neurons a day (resets at 00:00 UTC). Some models need a paid plan and will be refused.",
     ),
+    SAMBANOVA(
+        "SambaNova",
+        "sambanova_api_key",
+        "Meta-Llama-3.3-70B-Instruct",
+        "Sign in at cloud.sambanova.ai, open the API section and create a key. Do NOT add a payment method: the Free tier " +
+            "applies only while no payment method is linked, and that is what keeps this at zero cost.",
+        "Cloud warning: your messages leave this phone and SambaNova's free-tier data terms are not documented on its limits page. " +
+            "The Free tier is small: 20 requests a day and 200,000 tokens a day per model (20 a minute). The reset time is not " +
+            "documented. Models marked preview may be removed at short notice.",
+    ),
 }
 
 data class JarvisSettings(
@@ -190,6 +217,7 @@ data class JarvisSettings(
     val groqModel: String = AiProvider.GROQ.defaultModel,
     val openrouterModel: String = AiProvider.OPENROUTER.defaultModel,
     val cloudflareModel: String = AiProvider.CLOUDFLARE.defaultModel,
+    val sambanovaModel: String = AiProvider.SAMBANOVA.defaultModel,
     /** Providers whose cloud/privacy warning the user has read and accepted. */
     val acknowledged: Set<AiProvider> = emptySet(),
     /** When a provider's quota is really used up, offer to switch to another one (with a countdown and Cancel). */
@@ -209,6 +237,7 @@ data class JarvisSettings(
         AiProvider.GROQ -> groqModel
         AiProvider.OPENROUTER -> openrouterModel
         AiProvider.CLOUDFLARE -> cloudflareModel
+        AiProvider.SAMBANOVA -> sambanovaModel
     }
 
     fun withModel(p: AiProvider, model: String): JarvisSettings = when (p) {
@@ -216,6 +245,7 @@ data class JarvisSettings(
         AiProvider.GROQ -> copy(groqModel = model)
         AiProvider.OPENROUTER -> copy(openrouterModel = model)
         AiProvider.CLOUDFLARE -> copy(cloudflareModel = model)
+        AiProvider.SAMBANOVA -> copy(sambanovaModel = model)
     }
 
     /** The model to actually call: the saved name, or the provider default when blank. */

@@ -247,7 +247,7 @@ private fun LiveBubble(text: String?, note: String?) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
         Column(Modifier.fillMaxWidth(0.88f)) {
             if (!text.isNullOrEmpty()) {
-                BubbleBody(mine = false, text = text, footer = null, interrupted = false)
+                BubbleBody(mine = false, text = text, footer = null, interrupted = false, streaming = true)
             } else {
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -261,7 +261,7 @@ private fun LiveBubble(text: String?, note: String?) {
 }
 
 @Composable
-private fun BubbleBody(mine: Boolean, text: String, footer: String?, interrupted: Boolean) {
+private fun BubbleBody(mine: Boolean, text: String, footer: String?, interrupted: Boolean, streaming: Boolean = false) {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
@@ -269,7 +269,10 @@ private fun BubbleBody(mine: Boolean, text: String, footer: String?, interrupted
         modifier = Modifier.fillMaxWidth(if (mine) 0.85f else 0.88f),
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            SelectionContainer { Text(text, style = MaterialTheme.typography.bodyLarge) }
+            // The user's own text is shown exactly as typed; only the assistant's reply is rendered as Markdown.
+            SelectionContainer {
+                if (mine) Text(text, style = MaterialTheme.typography.bodyLarge) else MarkdownText(text, streaming)
+            }
             if (interrupted) {
                 Text(
                     "Response interrupted",
