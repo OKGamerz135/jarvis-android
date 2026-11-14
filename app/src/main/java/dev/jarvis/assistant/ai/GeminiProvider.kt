@@ -249,6 +249,7 @@ object Providers {
     private val openRouter = OpenRouterProvider(DiagnosticsLog)
     private val cloudflare = CloudflareProvider(DiagnosticsLog)
     private val zai = ZaiProvider(DiagnosticsLog)
+    private val mistral = MistralProvider(DiagnosticsLog)
 
     fun openRouter(): OpenRouterProvider = openRouter
 
@@ -258,6 +259,7 @@ object Providers {
         AiProvider.OPENROUTER -> openRouter
         AiProvider.CLOUDFLARE -> cloudflare
         AiProvider.ZAI -> zai
+        AiProvider.MISTRAL -> mistral
     }
 
     fun diagnosticsFor(provider: AiProvider): ProviderDiagnostics = when (provider) {
@@ -266,5 +268,6 @@ object Providers {
         AiProvider.OPENROUTER -> openRouter
         AiProvider.CLOUDFLARE -> cloudflare
         AiProvider.ZAI -> zai
+        AiProvider.MISTRAL -> mistral
     }
 }

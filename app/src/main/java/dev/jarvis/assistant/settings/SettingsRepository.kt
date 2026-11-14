@@ -43,6 +43,7 @@ class SettingsRepository(context: Context) {
         val OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
         val CLOUDFLARE_MODEL = stringPreferencesKey("cloudflare_model")
         val ZAI_MODEL = stringPreferencesKey("zai_model")
+        val MISTRAL_MODEL = stringPreferencesKey("mistral_model")
         val ACKNOWLEDGED = stringSetPreferencesKey("acknowledged_providers")
         val FAILOVER = booleanPreferencesKey("failover_enabled")
         val MEMORY_ENABLED = booleanPreferencesKey("memory_enabled")
@@ -72,6 +73,7 @@ class SettingsRepository(context: Context) {
                 openrouterModel = this[OPENROUTER_MODEL] ?: d.openrouterModel,
                 cloudflareModel = this[CLOUDFLARE_MODEL] ?: d.cloudflareModel,
                 zaiModel = this[ZAI_MODEL] ?: d.zaiModel,
+                mistralModel = this[MISTRAL_MODEL] ?: d.mistralModel,
                 acknowledged = (this[ACKNOWLEDGED] ?: emptySet())
                     .mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
                     .toSet(),
@@ -97,6 +99,7 @@ class SettingsRepository(context: Context) {
             this[OPENROUTER_MODEL] = s.openrouterModel
             this[CLOUDFLARE_MODEL] = s.cloudflareModel
             this[ZAI_MODEL] = s.zaiModel
+            this[MISTRAL_MODEL] = s.mistralModel
             this[ACKNOWLEDGED] = s.acknowledged.map { it.name }.toSet()
             this[FAILOVER] = s.failoverEnabled
             this[MEMORY_ENABLED] = s.memoryEnabled

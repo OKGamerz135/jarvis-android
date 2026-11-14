@@ -224,6 +224,16 @@ enum class AiProvider(
             "Its free-model limits are not published either. If Z.ai answers \"insufficient balance\" (code 1113), the free API " +
             "is not available for your account: do not add funds, just use another provider.",
     ),
+    MISTRAL(
+        "Mistral",
+        "mistral_api_key",
+        "mistral-small-latest",
+        "Sign up at console.mistral.ai, activate the free Experiment plan (Mistral says no credit card is required, only a " +
+            "verified phone number) and create an API key. Do NOT upgrade to the Scale plan: that is the paid plan.",
+        "Cloud warning: your messages leave this phone. Mistral says requests on the free Experiment plan may be used to " +
+            "train its models, so avoid sending anything private. Free limits are small (about 1 request per second) and are " +
+            "meant for trying things out; when you hit them requests simply fail and nothing is billed unless you upgrade.",
+    ),
 }
 
 data class JarvisSettings(
@@ -245,6 +255,7 @@ data class JarvisSettings(
     val openrouterModel: String = AiProvider.OPENROUTER.defaultModel,
     val cloudflareModel: String = AiProvider.CLOUDFLARE.defaultModel,
     val zaiModel: String = AiProvider.ZAI.defaultModel,
+    val mistralModel: String = AiProvider.MISTRAL.defaultModel,
     /** Providers whose cloud/privacy warning the user has read and accepted. */
     val acknowledged: Set<AiProvider> = emptySet(),
     /** When a provider's quota is really used up, offer to switch to another one (with a countdown and Cancel). */
@@ -265,6 +276,7 @@ data class JarvisSettings(
         AiProvider.OPENROUTER -> openrouterModel
         AiProvider.CLOUDFLARE -> cloudflareModel
         AiProvider.ZAI -> zaiModel
+        AiProvider.MISTRAL -> mistralModel
     }
 
     fun withModel(p: AiProvider, model: String): JarvisSettings = when (p) {
@@ -273,6 +285,7 @@ data class JarvisSettings(
         AiProvider.OPENROUTER -> copy(openrouterModel = model)
         AiProvider.CLOUDFLARE -> copy(cloudflareModel = model)
         AiProvider.ZAI -> copy(zaiModel = model)
+        AiProvider.MISTRAL -> copy(mistralModel = model)
     }
 
     /** The model to actually call: the saved name, or the provider default when blank. */
