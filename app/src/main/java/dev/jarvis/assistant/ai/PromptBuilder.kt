@@ -48,6 +48,9 @@ object PromptBuilder {
         appendLine(Profanity.of(s.profanity).prompt)
     }.trim()
 
+    /** The per-request note for the newest user message. See [Profanity.reminder]. Empty at level 0. */
+    fun styleReminder(s: JarvisSettings): String = Profanity.reminder(s.profanity)
+
     /** Short single-line fields can't smuggle extra lines into the prompt. */
     private fun oneLine(value: String): String =
         value.replace(Regex("[\\r\\n\"]+"), " ").trim().take(MAX_SHORT_FIELD)

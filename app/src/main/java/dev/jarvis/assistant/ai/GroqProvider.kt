@@ -142,7 +142,7 @@ class GroqProvider(
         } catch (e: IOException) {
             // A cancelled request closes its own socket; that is not a network failure.
             currentCoroutineContext().ensureActive()
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -167,7 +167,7 @@ class GroqProvider(
             call.ok(status)
             ModelInfo(entry.id, null, listOf("chat.completions"))
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -190,7 +190,7 @@ class GroqProvider(
             call.ok(status, limitsNote(conn))
             text
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }

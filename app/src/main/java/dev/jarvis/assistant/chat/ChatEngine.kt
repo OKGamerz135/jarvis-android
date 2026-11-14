@@ -21,6 +21,8 @@ class ChatTarget(
     val model: String,
     val apiKey: String,
     val systemPrompt: String,
+    /** Restates the personality setting on the newest user message of the request (not saved). Empty = none. */
+    val styleReminder: String = "",
 ) {
     val providerLabel: String get() = provider.label
 }
@@ -65,7 +67,7 @@ class ChatEngine(
         options: CallOptions,
         onPartial: (String) -> Unit,
     ): GenResult {
-        val history = HistoryTrimmer.select(conv.messages, target.historyBudgetChars).messages
+        val history = withReminder(HistoryTrimmer.select(conv.messages, target.historyBudgetChars).messages, target.styleReminder)
         val request = ChatRequest(target.model, target.apiKey, target.systemPrompt, history)
         val reply = StringBuilder()
         try {
@@ -89,6 +91,13 @@ class ChatEngine(
         val done = conv.withMessage(assistantMessage(target, text, interrupted = false))
         storage.save(done)
         return GenResult.Success(done)
+    }
+
+    /** Adds the note to a copy of the newest user message. The saved conversation is never touched. */
+    private fun withReminder(messages: List<dev.jarvis.assistant.ai.ChatMessage>, note: String): List<dev.jarvis.assistant.ai.ChatMessage> {
+        val last = messages.lastOrNull()
+        if (note.isBlank() || last == null || last.role != ChatRole.USER) return messages
+        return messages.dropLast(1) + last.copy(text = last.text + "\n\n" + note)
     }
 
     private fun savePartial(conv: Conversation, target: ChatTarget, text: String): Conversation {

@@ -21,20 +21,20 @@ import java.time.Instant
 import kotlin.random.Random
 
 /**
- * Talks to SambaNova Cloud's OpenAI-compatible API. Same rules as [GeminiProvider]: every HTTP attempt is logged as
+ * Talks to Z.ai's chat API (free GLM Flash models only). Same rules as [GeminiProvider]: every HTTP attempt is logged as
  * metadata only, the key travels only in a header, and retries happen only for "overloaded".
  */
-class SambaNovaProvider(
+class ZaiProvider(
     private val sink: DiagnosticsSink = NoopSink,
-    private val baseUrl: String = "https://api.sambanova.ai",
+    private val baseUrl: String = "https://api.z.ai",
     private val clock: () -> Instant = { Instant.now() },
     private val sleeper: suspend (Long) -> Unit = { delay(it) },
     private val random: Random = Random.Default,
 ) : LlmProvider, ProviderDiagnostics {
 
     companion object {
-        const val NAME = "SambaNova"
-        private const val CHAT_PATH = "/v1/chat/completions"
+        const val NAME = "Z.ai GLM"
+        private const val CHAT_PATH = "/api/paas/v4/chat/completions"
     }
 
     private val host: String get() = baseUrl.removePrefix("https://").removePrefix("http://")
@@ -84,6 +84,7 @@ class SambaNovaProvider(
     // ------------------------------------------------------------------ streaming generation
 
     override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow {
+        requireFreeModel(request.model)
         var emitted = false
         var attempt = 0
         while (true) {
@@ -113,7 +114,7 @@ class SambaNovaProvider(
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept", "text/event-stream")
-            conn.outputStream.use { it.write(SambaNovaParsing.buildBody(request, stream = true).toByteArray(Charsets.UTF_8)) }
+            conn.outputStream.use { it.write(ZaiParsing.buildBody(request, stream = true).toByteArray(Charsets.UTF_8)) }
 
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, request.model)
@@ -127,7 +128,7 @@ class SambaNovaProvider(
                 if (payload.isEmpty()) continue
                 if (payload == "[DONE]") break
                 val text = try {
-                    SambaNovaParsing.deltaText(payload)
+                    ZaiParsing.deltaText(payload)
                 } catch (e: LlmException) {
                     throw call.failed(status, null, (e.error as? LlmError.Other)?.message, e.error)
                 }
@@ -142,7 +143,7 @@ class SambaNovaProvider(
         } catch (e: IOException) {
             // A cancelled request closes its own socket; that is not a network failure.
             currentCoroutineContext().ensureActive()
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -150,45 +151,45 @@ class SambaNovaProvider(
 
     // ------------------------------------------------------------------ diagnostics calls
 
-    /** Uses the OpenAI-style model list (GET /v1/models; SambaNova does not document it separately, so a failure here is reported as such) rather than a per-model lookup. No generation. */
-    override suspend fun checkModel(apiKey: String, model: String): ModelInfo = withContext(Dispatchers.IO) {
-        val path = "/v1/models"
-        val call = Call(CallKind.AVAILABILITY, "GET", model, path, apiKey, null, 1)
-        val conn = open(path, "GET", apiKey, 20_000)
-        try {
-            val status = conn.responseCode
-            if (status != 200) throw httpFailure(call, conn, status, model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            if (!SambaNovaParsing.findModel(body, model)) {
-                throw call.failed(status, null, "the model is not in the provider's model list", LlmError.ModelNotFound(model))
-            }
-            call.ok(status)
-            ModelInfo(model, null, listOf("chat.completions"))
-        } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
-        } finally {
-            conn.disconnect()
+    /**
+     * Z.ai documents no model-list call, so nothing is sent: this only checks that the model is one of the free ones.
+     * The "Test message" button is what proves the key works (it sends one tiny generation).
+     */
+    override suspend fun checkModel(apiKey: String, model: String): ModelInfo {
+        requireFreeModel(model)
+        return ModelInfo(model.trim(), null, listOf("chat.completions"))
+    }
+
+    private fun requireFreeModel(model: String) {
+        if (!ZaiParsing.isFreeModel(model)) {
+            throw LlmException(
+                LlmError.Unsupported(
+                    "\"${Redactor.clean(model, emptyList(), 60)}\" is not one of the free Z.ai models " +
+                        "(${ZaiParsing.FREE_MODELS.joinToString()}). JARVIS only calls free models so nothing can be billed.",
+                ),
+            )
         }
     }
 
     override suspend fun generateOnce(request: ChatRequest): String = withContext(Dispatchers.IO) {
+        requireFreeModel(request.model)
         val path = CHAT_PATH
         val call = Call(CallKind.GENERATE_ONCE, "POST", request.model, path, request.apiKey, request.sizeInChars(), 1)
         val conn = open(path, "POST", request.apiKey, 60_000)
         try {
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
-            conn.outputStream.use { it.write(SambaNovaParsing.buildBody(request, stream = false).toByteArray(Charsets.UTF_8)) }
+            conn.outputStream.use { it.write(ZaiParsing.buildBody(request, stream = false).toByteArray(Charsets.UTF_8)) }
 
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, request.model)
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            val text = SambaNovaParsing.messageText(body)
+            val text = ZaiParsing.messageText(body)
             if (text.isEmpty()) throw call.failed(status, null, "no text returned", LlmError.Blocked("the model returned no text"))
             call.ok(status, limitsNote(conn))
             text
         } catch (e: IOException) {
-            throw call.failed(null, null, e.javaClass.simpleName, LlmError.Offline)
+            throw call.failed(null, null, e.javaClass.simpleName, ioFailure(e))
         } finally {
             conn.disconnect()
         }
@@ -209,12 +210,7 @@ class SambaNovaProvider(
 
     private fun httpFailure(call: Call, conn: HttpURLConnection, status: Int, model: String): LlmException {
         val body = readErrorBody(conn)
-        val names = listOf(
-            "retry-after", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests",
-            "x-ratelimit-remaining-requests-day", "x-ratelimit-reset-requests-day",
-        )
-        val headers = names.associateWith { conn.getHeaderField(it)?.takeIf { v -> v.length <= 40 } }
-        val parsed = SambaNovaParsing.parseFailure(status, body, headers, model, clock(), call.secretsList)
+        val parsed = ZaiParsing.parseFailure(status, body, conn.getHeaderField("retry-after"), model, clock(), call.secretsList)
         val message = parsed.apiMessage ?: (parsed.error as? LlmError.NotFromApi)?.snippet
         return call.failed(status, parsed.apiStatus, message, parsed.error)
     }
@@ -228,12 +224,7 @@ class SambaNovaProvider(
         }
     }
 
-    /** SambaNova reports the limits and what is left in headers. Numbers only, so it is safe to log. */
-    private fun limitsNote(conn: HttpURLConnection): String? {
-        fun h(name: String) = conn.getHeaderField(name)?.takeIf { it.length <= 20 }
-        val parts = mutableListOf<String>()
-        h("x-ratelimit-limit-requests")?.let { parts += "per minute $it (left ${h("x-ratelimit-remaining-requests") ?: "?"})" }
-        h("x-ratelimit-limit-requests-day")?.let { parts += "per day $it (left ${h("x-ratelimit-remaining-requests-day") ?: "?"})" }
-        return if (parts.isEmpty()) null else "limits: " + parts.joinToString(", ")
-    }
+    /** Z.ai documents no rate-limit headers, so there is nothing to note. */
+    @Suppress("UNUSED_PARAMETER")
+    private fun limitsNote(conn: HttpURLConnection): String? = null
 }

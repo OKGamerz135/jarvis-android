@@ -25,6 +25,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val _keyPresent = MutableStateFlow(AiProvider.entries.associateWith { keys.has(it.keyName) })
     val keyPresent: StateFlow<Map<AiProvider, Boolean>> = _keyPresent.asStateFlow()
 
+    init {
+        // SambaNova was removed from the app. Delete any key saved for it so nothing is left behind.
+        viewModelScope.launch(Dispatchers.IO) { runCatching { keys.remove("sambanova_api_key") } }
+    }
+
     fun update(transform: (JarvisSettings) -> JarvisSettings) {
         viewModelScope.launch { repo.update(transform) }
     }

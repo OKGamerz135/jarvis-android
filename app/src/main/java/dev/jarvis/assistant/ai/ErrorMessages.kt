@@ -55,7 +55,8 @@ object ErrorMessages {
         is LlmError.InternalError ->
             "The provider had an internal error. If it keeps happening, the request may be too long for it."
         is LlmError.Timeout ->
-            "The provider didn't finish in time. A shorter message may help."
+            "The provider connected but sent no answer in time. That is the provider being slow or overloaded, not your internet. " +
+                "Try again, or switch provider."
         is LlmError.BillingRequired ->
             "The provider says the free tier isn't available for this project or region and wants billing enabled. " +
                 "JARVIS will never enable billing for you. Use another provider or a local model instead."
