@@ -14,7 +14,6 @@ object PromptBuilder {
         appendLine()
         appendLine(s.personality.prompt)
         appendLine(Humour.of(s.humour).prompt)
-        appendLine(Profanity.of(s.profanity).prompt)
         appendLine(s.tone.prompt)
         appendLine(s.length.prompt)
 
@@ -31,7 +30,7 @@ object PromptBuilder {
         appendLine()
         appendLine("Rules that always apply:")
         appendLine("- Be accurate. If you are unsure or don't know, say so plainly instead of guessing or inventing facts, sources or numbers.")
-        appendLine("- Don't simply agree with the user. If they are wrong, say so politely and explain why.")
+        appendLine("- Don't simply agree with the user. If they are wrong, say so plainly and explain why.")
         appendLine("- Use the conversation so far. Understand follow-up questions without making the user repeat themselves.")
         appendLine("- Be serious and gentle when the situation calls for it (distress, health, safety, grief), whatever the humour setting says.")
         appendLine("- Never mock the user about sensitive things such as health, family, religion or identity.")
@@ -43,6 +42,10 @@ object PromptBuilder {
             appendLine("The user's own instructions (follow them unless they conflict with the rules above):")
             appendLine(custom)
         }
+
+        // Last on purpose: the closing instruction wins, so earlier "be mild/polite" wording cannot dilute the slider.
+        appendLine()
+        appendLine(Profanity.of(s.profanity).prompt)
     }.trim()
 
     /** Short single-line fields can't smuggle extra lines into the prompt. */

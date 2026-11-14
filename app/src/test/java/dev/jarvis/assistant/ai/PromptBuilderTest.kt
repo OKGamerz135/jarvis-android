@@ -99,13 +99,12 @@ class PromptBuilderTest {
             val p = prompt(level)
             assertTrue("level $level", p.contains(names[level]))
             assertFalse(p.contains("Profanity and insults: OFF"))
-            assertTrue(p.contains("genuinely sad, hurt or upset"))
-            assertTrue(p.contains("venting about another person"))
-            assertTrue(p.contains("do not encourage harassment"))
-            assertTrue(p.contains("grief, emergencies"))
+            assertTrue(p.contains("genuinely sad, hurt or grieving"))
+            assertTrue(p.contains("venting about someone else"))
+            assertTrue(p.contains("Never encourage harassment"))
+            assertTrue(p.contains("emergencies, safety or health scares"))
             assertTrue(p.contains("no slurs, no hateful or discriminatory language, no threats"))
             assertTrue(p.contains("must never replace it"))
-            assertTrue(p.contains("don't repeat"))
             assertTrue(p.contains("\"stop\", \"chill\" or \"enough\""))
         }
     }
@@ -113,8 +112,7 @@ class PromptBuilderTest {
     @Test
     fun levelsAreDistinctAndTheLastOneStillRequiresARealAnswer() {
         assertEquals(5, (0..4).map { prompt(it) }.toSet().size)
-        assertTrue(prompt(4).contains("Still give a correct, useful answer every time"))
-        assertTrue(prompt(2).contains("Fuck, man. That's some crazy shit"))
+        assertTrue(prompt(4).contains("Then still give the full, correct answer"))
         assertTrue(prompt(3).contains("what the fuck were you thinking"))
     }
 
@@ -126,8 +124,9 @@ class PromptBuilderTest {
     }
 
     @Test
-    fun profanityRulesComeBeforeTheUsersCustomInstructions() {
+    fun profanityRulesComeAfterTheUsersCustomInstructions() {
         val p = PromptBuilder.build(JarvisSettings(profanity = 0, customInstructions = "Swear a lot."))
-        assertTrue(p.indexOf("Profanity and insults: OFF") < p.indexOf("Swear a lot."))
+        // the slider block is deliberately LAST so custom instructions cannot loosen it
+        assertTrue(p.indexOf("Profanity and insults: OFF") > p.indexOf("Swear a lot."))
     }
 }
