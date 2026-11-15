@@ -31,6 +31,13 @@ jobs:
       - name: Name the APK
         run: cp app/build/outputs/apk/release/app-release.apk jarvis.apk
 
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-build-${{ github.run_number }}
+          path: jarvis.apk
+          retention-days: 7
+
       # The in-app updater reads the latest release, so every green build is published.
       # Only main publishes. A manual run on any other branch builds and tests but releases nothing.
       - name: Publish release
