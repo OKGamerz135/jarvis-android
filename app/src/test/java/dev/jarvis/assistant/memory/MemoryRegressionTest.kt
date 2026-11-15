@@ -134,7 +134,8 @@ class MemoryRegressionTest {
 
     // ---- Build 26b: "OK, I take it back, it's really orange." names no topic
 
-    private val recentColourChat = listOf("My favourite colour is blue.", "Noted, sir. Blue it is.")
+    private fun turns(vararg s: String) = s.mapIndexed { i, x -> ChatTurn(i % 2 == 0, x) }
+    private val recentColourChat = turns("My favourite colour is blue.", "Noted, sir. Blue it is.")
 
     @Test fun takeItBackCorrectionUpdatesTheSingleRecordAndEverythingShowsOrange() = runBlocking {
         val s = service()
@@ -171,7 +172,7 @@ class MemoryRegressionTest {
     @Test fun aCorrectionWithNoMatchingTopicChangesNothingAndSaysSo() = runBlocking {
         val s = service()
         s.observe("My favourite colour is blue.")
-        val r = s.observe("OK, I take it back, it's really orange.", listOf("What's the weather like?", "Sunny."))
+        val r = s.observe("OK, I take it back, it's really orange.", turns("What's the weather like?", "Sunny."))
         assertEquals(0, r.updated)
         assertTrue(r.correctionAsked)
         val note = MemoryStatusNote.of(r)
@@ -184,7 +185,7 @@ class MemoryRegressionTest {
         val s = service()
         s.observe("My favourite colour is blue.")
         s.observe("My favourite food is pizza.")
-        val r = s.observe("I take it back, it's really orange", listOf("My favourite colour is blue.", "My favourite food is pizza."))
+        val r = s.observe("I take it back, it's really orange", turns("My favourite colour is blue.", "My favourite food is pizza."))
         assertEquals(0, r.updated)
         assertEquals(setOf("Favourite colour is blue", "Favourite food is pizza"), contents(s).toSet())
     }
@@ -225,5 +226,121 @@ class MemoryRegressionTest {
         val r = MemoryService({ lossy }, io = Dispatchers.Unconfined).observe("I take it back, it's really orange", recentColourChat)
         assertTrue(r.failed)
         assertFalse(MemoryStatusNote.of(r).contains("UPDATED:"))
+    }
+
+    // ---- Build 26c: the real-device failures (phone test of build #38)
+
+    @Test fun iChangeMyMindItsOrangeNowUpdatesTheRecordEverywhere() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        val r = s.observe("I change my mind. it's orange now", recentColourChat)
+        assertEquals(1, r.updated)
+        val note = MemoryStatusNote.of(r)
+        assertTrue(note, note.contains("UPDATED:"))
+        assertEquals("Memory updated: Favourite colour is orange", MemoryStatusNote.notice(r))
+        assertEquals(1, s.memories.value.size)
+        assertTrue(s.memories.value.single().content.contains("orange"))
+        val db = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}")
+        val rows = JdbcSql(db).query("SELECT content FROM memories") { it.string(0) }
+        db.close()
+        assertEquals(listOf("Favourite colour is orange"), rows)
+        assertEquals(listOf("Favourite colour is orange"), contents(service()))
+    }
+
+    @Test fun threeCorrectionPhrasingsAllEndWithExactlyOneOrangeRecord() = runBlocking {
+        for (t in listOf("I change my mind. it's orange now", "OK, I take it back, it's really orange", "Make it orange now")) {
+            val s = MemoryService({ InMemoryMemoryStorage() }, io = Dispatchers.Unconfined)
+            s.observe("My favourite colour is blue.")
+            val r = s.observe(t, recentColourChat)
+            assertEquals(t, 1, r.updated)
+            assertEquals(t, listOf("Favourite colour is orange"), contents(s))
+        }
+    }
+
+    @Test fun aManuallyAddedFavouriteCanBeCorrectedToo() = runBlocking {
+        val s = service()
+        s.addManual(MemoryCategory.FAVOURITE, "Favourite colour is blue")
+        val r = s.observe("I change my mind. it's orange now", recentColourChat)
+        assertEquals(1, r.updated)
+        assertEquals(listOf("Favourite colour is orange"), contents(service()))
+    }
+
+    @Test fun saveThatInMemoryStoresTheEarlierStatement() = runBlocking {
+        val s = service()
+        val r = s.observe("Save that in memory", turns("Remember I use Kotlin.", "Okay."))
+        assertEquals(1, r.saved)
+        assertTrue(r.referenceAsked)
+        assertTrue(MemoryStatusNote.of(r).contains("SAVED:"))
+        assertEquals(1, contents(service()).size)
+        assertTrue(contents(service()).single().contains("Kotlin"))
+    }
+
+    @Test fun saveThatAfterAFailedCorrectionAppliesItAndNeverDuplicates() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        val r = s.observe("Save that in memory", turns("My favourite colour is blue.", "Noted.", "I change my mind. it's orange now", "Orange it is."))
+        assertEquals(1, r.updated)
+        assertEquals(listOf("Favourite colour is orange"), contents(service()))
+        val again = s.observe("Save that in memory", turns("I change my mind. it's orange now", "Done."))
+        assertEquals(listOf("Favourite colour is orange"), contents(service()))
+        assertEquals(0, again.saved)
+    }
+
+    @Test fun saveThatWithNothingToSaveIsReportedHonestlyAndNeverAsAFeatureOutage() = runBlocking {
+        val s = service()
+        val r = s.observe("Save that in memory", turns("What's the capital of France?", "Paris."))
+        assertEquals(0, r.saved + r.updated)
+        assertFalse(r.failed)
+        val note = MemoryStatusNote.of(r)
+        assertTrue(note, note.contains("NOT SAVED"))
+        assertTrue(note, note.contains("unless this note says FAILED, memory is working normally"))
+        assertEquals("Memory: nothing was saved. It was not clear what to keep.", MemoryStatusNote.notice(r))
+        assertTrue(contents(service()).isEmpty())
+    }
+
+    @Test fun rememberThatMyFavouriteColourIsOrangeUpdatesTheBlueRecord() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        val r = s.observe("Remember that my favourite colour is orange", recentColourChat)
+        assertEquals(1, r.updated)
+        assertEquals(listOf("Favourite colour is orange"), contents(service()))
+    }
+
+    @Test fun thatsMyFavouritePhoneUsesTheEarlierMessageAndIsSavedAndVisible() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue.")
+        s.observe("OK. I've an iQOO 13")
+        val r = s.observe("That's my favourite phone", turns("OK. I've an iQOO 13", "Nice phone, sir."))
+        assertEquals(1, r.saved)
+        assertEquals("Memory saved: Favourite phone is iQOO 13", MemoryStatusNote.notice(r))
+        val reopened = contents(service())
+        assertEquals(setOf("Favourite colour is blue", "Favourite phone is iQOO 13"), reopened.toSet())
+        val ui = s.memories.value.first { it.content.contains("phone") }
+        assertEquals(MemoryCategory.FAVOURITE, ui.category)
+        assertEquals(MemoryStatus.ACTIVE, ui.status)
+    }
+
+    @Test fun favouriteWithTheThingInTheSameSentenceWorks() = runBlocking {
+        val s = service()
+        s.observe("My iQOO 13 is my favourite phone")
+        assertEquals(listOf("Favourite phone is iQOO 13"), contents(s))
+    }
+
+    @Test fun thatsMyFavouriteWithNothingEarlierIsNotInvented() = runBlocking {
+        val s = service()
+        val r = s.observe("That's my favourite phone", turns("What's the weather like?", "Sunny."))
+        assertEquals(0, r.saved)
+        assertTrue(contents(s).isEmpty())
+    }
+
+    @Test fun theUiNoticeIsNullForOrdinaryChatAndTruthfulOtherwise() = runBlocking {
+        val s = service()
+        assertNull(MemoryStatusNote.notice(s.observe("What's the weather like?")))
+        assertTrue(MemoryStatusNote.notice(ObserveResult(failed = true))!!.contains("could not save"))
+    }
+
+    @Test fun aTimeOrWeatherWordIsNotTakenAsACorrection() {
+        assertNull(MemoryExtractor.correctionValue("it's late now"))
+        assertNull(MemoryExtractor.correctionValue("it's raining now"))
     }
 }

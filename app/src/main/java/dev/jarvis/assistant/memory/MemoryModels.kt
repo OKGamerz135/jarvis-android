@@ -16,6 +16,9 @@ enum class MemoryCategory(val label: String) {
 
 enum class MemorySource { AUTO, MANUAL }
 
+/** One earlier message of the open conversation, oldest first in a list. Used to resolve "that", "it" and corrections. */
+data class ChatTurn(val fromUser: Boolean, val text: String)
+
 /** ACTIVE memories are used in chat. PENDING ones are proposals waiting for the user's yes or no and are never used. */
 enum class MemoryStatus { ACTIVE, PENDING }
 

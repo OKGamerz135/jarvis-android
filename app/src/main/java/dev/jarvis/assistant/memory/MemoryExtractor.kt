@@ -23,6 +23,16 @@ object MemoryExtractor {
     private val EXPLICIT_SAVE = Regex(
         """(?i)^$ASK(?:save|store|add|put|write(?:\s+down)?|log|keep|memori[sz]e)(?:\s+(?:this|that|it))?(?:\s+(?:in|into|to|on))?(?:\s+(?:your|my|the))?\s+(?:long[- ]term\s+)?(?:memory|memories)(?:\s+(?:that|:))?\s*[:,\-]?\s*(.{4,})$""",
     )
+    /** "save that in memory", "remember that", "store it to memory": nothing to remember is named, so it points at an earlier message. */
+    private val REF_SAVE_MEM = Regex(
+        """(?i)^$ASK(?:save|store|add|put|write(?:\s+down)?|log|keep|memori[sz]e|remember|note(?:\s+down)?)\s+(?:that|this|it)\s+(?:in|into|to|on)\s+(?:your\s+|my\s+|the\s+)?(?:long[- ]term\s+)?(?:memory|memories|notes)(?:\s+(?:please|now))?$""",
+    )
+    private val REF_SAVE_BARE = Regex("""(?i)^$ASK(?:remember|memori[sz]e|note|don't forget|dont forget)\s+(?:that|this|it)(?:\s+(?:please|now))?$""")
+    private val FAV_REF = Regex("""(?i)^(?:that'?s|that\s+is|it'?s|it\s+is|this\s+is|they'?re|those\s+are)\s+(?:also\s+|really\s+|definitely\s+|easily\s+)?my\s+(?:all[- ]time\s+)?fav(?:ou?rite)?\s+([a-z][a-z \-]{1,30})$""")
+    private val FAV_REV = Regex("""(?i)^(.{2,60}?)\s+(?:is|are)\s+my\s+(?:all[- ]time\s+)?fav(?:ou?rite)?\s+([a-z][a-z \-]{1,30})$""")
+    private val BOUGHT = Regex("""(?i)^i\s+(?:just\s+|recently\s+)?(?:bought|got|purchased|ordered|switched\s+to|moved\s+to|started\s+using|am\s+using|'m\s+using)\s+(.{2,100})$""")
+    private val ARTICLE = Regex("""(?i)^(?:an?|the|my)\s+""")
+    private val NOT_TOPIC_WORDS = setOf("late", "early", "raining", "rainy", "cold", "hot", "cloudy", "sunny", "dark", "noon", "midnight", "morning", "night", "evening", "bedtime", "okay", "fine", "good", "bad")
     private val SAVE_INTENT = Regex("""(?i)\b(remember|save|store|memori[sz]e|note (?:this|that|down)|don't forget|dont forget|keep (?:this |that )?in mind)\b""")
     private val ASKING_TO = Regex("""(?i)^(?:(?:can|could|would|will)\s+you|please)\b""")
     private val LEAD_IN = Regex("""(?i)^(?:hey|hi|hello|ok|okay|so|well|and|but|also|btw|by the way|you know(?: what)?|just so you know|fyi|oh|listen|look|jarvis|sir)\b[,:!]?\s+""")
@@ -42,14 +52,71 @@ object MemoryExtractor {
     private val LIKES = Regex("""(?i)^i\s+(?:really\s+|absolutely\s+)?(like|love|enjoy|prefer|hate|dislike|can't stand)\s+(.{2,100})$""")
     private val NAME = Regex("""(?i)^(?:my name is|call me|i go by)\s+([A-Z][\p{L}'-]{1,30})$""")
 
-    fun extract(text: String): List<Candidate> {
-        val out = mutableListOf<Candidate>()
+    /** What one user message means for memory, sentence by sentence, with the earlier turns available. */
+    data class Analysis(
+        val candidates: List<Candidate>,
+        /** A topic-less correction ("it's orange now"), reduced to the new value. */
+        val correction: String?,
+        /** "Save that in memory": nothing named, so it points at an earlier user message. */
+        val referencesPrevious: Boolean,
+    )
+
+    fun extract(text: String): List<Candidate> = analyze(text).candidates
+
+    /**
+     * The single entry point. Every sentence is looked at on its own (so "I change my mind. It's orange now." works),
+     * and [recent] (the turns before this message) is used for words that point backwards: "that's my favourite phone",
+     * "save that". Local rules only: nothing is sent to any provider.
+     */
+    fun analyze(text: String, recent: List<ChatTurn> = emptyList()): Analysis {
+        val candidates = mutableListOf<Candidate>()
+        var correction: String? = null
+        var ref = false
         for (raw in text.replace('\u2019', '\'').split(SENTENCE_SPLIT)) {
             val s = raw.trim().trim('"', '\'', '`').trimEnd('.', '!', ',', ';').trim()
-            if (s.length < 8 || s.length > 260) continue
-            candidateFor(s)?.let { out += it }
+            if (s.length < 4 || s.length > 260) continue
+            var plain = s
+            repeat(4) { plain = plain.replace(LEAD_IN, "") }
+            plain = plain.trimEnd('?', ' ', '.', '!').trim()
+            if (REF_SAVE_MEM.matches(plain) || REF_SAVE_BARE.matches(plain)) { ref = true; continue }
+            if (s.length >= 8) {
+                val c = candidateFor(s, recent = recent)
+                if (c != null) { candidates += c; continue }
+            }
+            if (correction == null) correction = correctionValue(s)
         }
-        return out
+        if (candidates.isEmpty() && correction == null && !ref) correction = correctionValue(text)
+        return Analysis(candidates, correction, ref)
+    }
+
+    /** A first-person statement in an earlier message that "save that" can store ("I've an iQOO 13" becomes "Has an iQOO 13"). */
+    fun statementCandidate(text: String): Candidate? {
+        for (raw in text.replace('\u2019', '\'').split(SENTENCE_SPLIT)) {
+            var s = raw.trim().trimEnd('.', '!', ',', ';', ' ').trim()
+            repeat(4) { s = s.replace(LEAD_IN, "") }
+            if (s.length < 8 || s.endsWith("?") || QUESTION_START.containsMatchIn(s) || TEMPORARY.containsMatchIn(s)) continue
+            if (!Regex("""(?i)^(?:i|i'm|i've|my|we|our)\b""").containsMatchIn(s)) continue
+            candidateFor(s)?.let { return it }
+            explicitCandidate(s)?.let { return it }
+        }
+        return null
+    }
+
+    /** The thing an earlier user message talked about ("iQOO 13" from "I've an iQOO 13"), for "that's my favourite phone". */
+    private fun entityIn(raw: String): String? {
+        for (part in raw.replace('\u2019', '\'').split(SENTENCE_SPLIT)) {
+            var s = part.trim().trimEnd('.', '!', ',', ';', ' ').trim()
+            repeat(4) { s = s.replace(LEAD_IN, "") }
+            val v = HAVE.matchEntire(s)?.groupValues?.get(1)
+                ?: BOUGHT.matchEntire(s)?.groupValues?.get(1)
+                ?: USE.matchEntire(s)?.groupValues?.get(1)
+                ?: TECH.matchEntire(s)?.groupValues?.get(2)
+                ?: FAVOURITE.matchEntire(s)?.groupValues?.get(2)
+                ?: continue
+            val e = clean(v).replace(ARTICLE, "").trim()
+            if (e.isNotEmpty() && e.split(Regex("""\s+""")).size <= 6) return e
+        }
+        return null
     }
 
     /** Did the user ask JARVIS to remember something (as opposed to asking whether it remembers)? */
@@ -62,7 +129,7 @@ object MemoryExtractor {
     private val HEDGE_LEAD = Regex("""(?i)^(?:i think|i guess|i suppose|i believe|maybe|probably|perhaps)[, ]+(?:that\s+)?""")
     private val HEDGE_TAIL = Regex("""(?i)[, ]+(?:maybe|probably|perhaps|i think|i guess)$""")
 
-    private fun candidateFor(original: String, explicitDepth: Int = 0): Candidate? {
+    private fun candidateFor(original: String, explicitDepth: Int = 0, recent: List<ChatTurn> = emptyList()): Candidate? {
         val question = original.endsWith("?")
         val uncertain = HEDGE.containsMatchIn(original)
         // Chatty openers ("you know what", "btw") and hedges are removed so the patterns still apply; the hedge is
@@ -87,6 +154,21 @@ object MemoryExtractor {
         FAVOURITE.matchEntire(s)?.let { m ->
             val topic = m.groupValues[1].trim().lowercase()
             val value = clean(m.groupValues[2])
+            return Candidate(MemoryCategory.FAVOURITE, "favourite $topic", "Favourite $topic is $value", conf, uncertain)
+        }
+        // "iQOO 13 is my favourite phone": the thing is in the same sentence.
+        FAV_REV.matchEntire(s)?.let { m ->
+            val value = clean(m.groupValues[1]).replace(ARTICLE, "").trim()
+            val topic = m.groupValues[2].trim().lowercase()
+            if (value.isNotEmpty() && value.split(Regex("""\s+""")).size <= 6) {
+                return Candidate(MemoryCategory.FAVOURITE, "favourite $topic", "Favourite $topic is $value", conf, uncertain)
+            }
+        }
+        // "That's my favourite phone": the thing is in an earlier message of the user's.
+        FAV_REF.matchEntire(s)?.let { m ->
+            val topic = m.groupValues[1].trim().lowercase()
+            val value = recent.asReversed().filter { it.fromUser }.take(3).firstNotNullOfOrNull { entityIn(it.text) }
+                ?: return null
             return Candidate(MemoryCategory.FAVOURITE, "favourite $topic", "Favourite $topic is $value", conf, uncertain)
         }
         TECH.matchEntire(s)?.let { m ->
@@ -155,7 +237,7 @@ object MemoryExtractor {
     }
 
     private val CORRECTION_CUE = Regex(
-        """(?i)^(?:i\s+take\s+(?:it|that)\s+back|take\s+(?:it|that)\s+back|scratch\s+that|never\s*mind|i\s+meant|i\s+mean|correction|sorry|wait|no|nope|actually|oops|my\s+bad|i\s+was\s+wrong)\b[,:;!.\-\s]*(?:it'?s|it\s+is|that'?s|its|make\s+it|change\s+it\s+to|set\s+it\s+to|it\s+should\s+be|i\s+meant|i\s+mean)?\s*(?:really|actually|now|in\s+fact)?\s*(.{2,60})$""",
+        """(?i)^(?:i\s+take\s+(?:it|that)\s+back|take\s+(?:it|that)\s+back|scratch\s+that|never\s*mind|i\s+(?:change|changed)\s+my\s+mind|(?:i\s+)?changed\s+my\s+mind|on\s+second\s+thoughts?|change\s+of\s+heart|i\s+meant|i\s+mean|correction|sorry|wait|no|nope|actually|oops|my\s+bad|i\s+was\s+wrong)\b[,:;!.\-\s]*(?:it'?s|it\s+is|that'?s|its|make\s+it|change\s+it\s+to|set\s+it\s+to|it\s+should\s+be|i\s+meant|i\s+mean)?\s*(?:really|actually|now|in\s+fact)?\s*(.{2,60})$""",
     )
     private val CORRECTION_ITS = Regex("""(?i)^(?:it'?s|it\s+is|that'?s)\s+(?:really|actually|now|in\s+fact)\s+(.{2,60})$|^(?:it'?s|it\s+is)\s+(.{2,40}?)\s+now$""")
     private val CORRECTION_CHANGE = Regex("""(?i)^(?:change|set|switch|update)\s+(?:it|that|my\s+[a-z]+(?:\s+[a-z]+)?)\s+to\s+(.{2,60})$|^make\s+it\s+(.{2,40})$""")
@@ -175,6 +257,8 @@ object MemoryExtractor {
             re.matchEntire(s)?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }
         } ?: return null
         val value = groups.trim().trimEnd('.', '!', ',', ';').trim()
+            .replace(Regex("""(?i)\s+now$"""), "").replace(Regex("""(?i)^now\s+"""), "").trim()
+        if (value.lowercase() in NOT_TOPIC_WORDS) return null
         if (value.isEmpty() || value.split(Regex("""\s+""")).size > 4 || NOT_A_VALUE.containsMatchIn(value)) return null
         return value
     }

@@ -121,7 +121,7 @@ class ChatMemoryTest {
         }
         val runner = ChatRunner(
             storage, ChatEngine(storage), scope, Dispatchers.IO, source, newLedger(), tickMs = 5,
-            memoryObserver = MemoryObserver { _, _ -> delay(100); "Memory status: UPDATED" },
+            memoryObserver = MemoryObserver { _, _ -> delay(100); MemoryOutcome("Memory status: UPDATED", "Memory updated: x") },
         )
         withTimeout(5000) { while (runner.send("my favourite colour is blue now") != SendResult.ACCEPTED) delay(5) }
         withTimeout(5000) { while (requests.isEmpty()) delay(5) }
@@ -139,7 +139,7 @@ class ChatMemoryTest {
         }
         val runner = ChatRunner(
             storage, ChatEngine(storage), scope, Dispatchers.IO, source, newLedger(), tickMs = 5,
-            memoryObserver = MemoryObserver { _, _ -> delay(60_000); "never" },
+            memoryObserver = MemoryObserver { _, _ -> delay(60_000); MemoryOutcome("never") },
         )
         withTimeout(5000) { while (runner.send("hello there friend") != SendResult.ACCEPTED) delay(5) }
         withTimeout(10_000) { while (requests.isEmpty()) delay(20) }
