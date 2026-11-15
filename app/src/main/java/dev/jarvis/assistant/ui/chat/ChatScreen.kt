@@ -97,6 +97,15 @@ fun ChatScreen(
             }
         }
 
+        ui.memoryNotice?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+
         MemoryApprovalBanner()
 
         ui.failover?.let { f ->

@@ -1,5 +1,6 @@
 package dev.jarvis.assistant.chat
 
+import dev.jarvis.assistant.memory.ChatTurn
 import dev.jarvis.assistant.memory.MemoryService
 import dev.jarvis.assistant.memory.MemoryStatusNote
 import dev.jarvis.assistant.settings.SettingsRepository
@@ -21,6 +22,11 @@ class AndroidMemoryHooks(
     override suspend fun contextFor(recentUserTexts: List<String>): String =
         if (enabled()) service.contextFor(recentUserTexts) else ""
 
-    override suspend fun onUserMessage(text: String): String =
-        if (enabled()) MemoryStatusNote.of(service.observe(text)) else MemoryStatusNote.OFF
+    override suspend fun onUserMessage(text: String, recent: List<ChatTurn>): MemoryOutcome =
+        if (enabled()) {
+            val r = service.observe(text, recent)
+            MemoryOutcome(MemoryStatusNote.of(r), MemoryStatusNote.notice(r))
+        } else {
+            MemoryOutcome(MemoryStatusNote.OFF)
+        }
 }

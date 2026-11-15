@@ -32,6 +32,12 @@ data class ObserveResult(
     val askedToSave: Boolean = false,
     /** The memory limit was reached, so a new fact could not be added. */
     val full: Boolean = false,
+    /** The user seems to be correcting a remembered fact, whether or not it could be applied. */
+    val correctionAsked: Boolean = false,
+    /** The user said "save that"; true whether or not the earlier message could be resolved. */
+    val referenceAsked: Boolean = false,
+    /** The memory text that was saved or changed. Shown only on the local screen; never sent to the AI or logged. */
+    val summary: String? = null,
 )
 
 /**
@@ -78,22 +84,81 @@ class MemoryService(
     // ------------------------------------------------------------------ automatic extraction
 
     /** Looks at one user message and saves, updates or proposes memories. Never throws. */
-    suspend fun observe(userText: String): ObserveResult {
+    suspend fun observe(userText: String, recent: List<ChatTurn> = emptyList()): ObserveResult {
         val asked = MemoryExtractor.asksToSave(userText)
-        val candidates = MemoryExtractor.extract(userText)
-        if (candidates.isEmpty()) return ObserveResult(askedToSave = asked)
+        val a = MemoryExtractor.analyze(userText, recent)
+        if (a.candidates.isEmpty() && a.correction == null && !a.referencesPrevious) return ObserveResult(askedToSave = asked)
         // If storage fails the result says so ("failed"), so nothing is ever reported as saved when it was not.
         val r = safe(ObserveResult(failed = true)) { s ->
             var r = ObserveResult()
-            for (c in candidates) r = applyCandidate(s, c).let { add(r, it) }
+            for (c in a.candidates) r = add(r, applyCandidate(s, c))
+            if (a.candidates.isEmpty()) {
+                // Words that point backwards ("it's orange now", "save that") are resolved against the earlier turns.
+                if (a.correction != null) r = add(r, applyCorrection(s, a.correction, recent))
+                else if (a.referencesPrevious) r = add(r, resolveReference(s, recent))
+            }
             publish(s)
             r
         }
-        return r.copy(askedToSave = asked)
+        return r.copy(askedToSave = asked, correctionAsked = a.correction != null, referenceAsked = a.referencesPrevious)
     }
 
-    private fun add(a: ObserveResult, b: ObserveResult) =
-        ObserveResult(a.saved + b.saved, a.updated + b.updated, a.duplicates + b.duplicates, a.proposed + b.proposed, a.blocked + b.blocked, full = a.full || b.full)
+    private fun add(a: ObserveResult, b: ObserveResult) = a.copy(
+        saved = a.saved + b.saved, updated = a.updated + b.updated, duplicates = a.duplicates + b.duplicates,
+        proposed = a.proposed + b.proposed, blocked = a.blocked + b.blocked, full = a.full || b.full,
+        summary = b.summary ?: a.summary,
+    )
+
+    /**
+     * "Save that in memory": stores what the user's most recent earlier message(s) said, exactly as if they had said it
+     * with "remember". Nothing is guessed: if no earlier message holds a clear fact, nothing is saved and the result says so.
+     */
+    private fun resolveReference(s: MemoryStorage, recent: List<ChatTurn>): ObserveResult {
+        var seen = 0
+        for (idx in recent.indices.reversed()) {
+            val turn = recent[idx]
+            if (!turn.fromUser) continue
+            if (seen++ >= 3) break
+            val before = recent.subList(0, idx)
+            val a = MemoryExtractor.analyze(turn.text, before)
+            if (a.candidates.isNotEmpty()) {
+                var r = ObserveResult()
+                for (c in a.candidates) r = add(r, applyCandidate(s, c.copy(uncertain = false, confidence = 1.0, explicit = true)))
+                return r
+            }
+            if (a.correction != null) {
+                // A correction is never stored as a sentence of its own ("I change my mind" is not a fact).
+                val r = applyCorrection(s, a.correction, recent)
+                if (r.updated + r.duplicates + r.blocked > 0) return r
+                continue
+            }
+            MemoryExtractor.statementCandidate(turn.text)?.let { return applyCandidate(s, it.copy(uncertain = false, confidence = 1.0, explicit = true)) }
+        }
+        return ObserveResult()
+    }
+
+    /**
+     * Applies a topic-less correction to the ONE saved fact the recent conversation is about. A saved fact shaped like
+     * "Favourite colour is blue" or "Their phone is X" is rebuilt with the new value. If no single memory clearly matches,
+     * nothing is touched and the result says so; a guess is never written.
+     */
+    private fun applyCorrection(s: MemoryStorage, value: String, recent: List<ChatTurn>): ObserveResult {
+        val words = recent.takeLast(4).flatMap { MemoryMatcher.tokens(it.text) }.toSet()
+        val candidates = s.all()
+            .filter { it.status == MemoryStatus.ACTIVE && it.category in CORRECTABLE && IS_SPLIT.matches(it.content) }
+            .map { it to MemoryMatcher.score(it, words) }
+            .filter { it.second >= MIN_SCORE }
+            .sortedByDescending { it.second }
+        val best = candidates.firstOrNull() ?: return ObserveResult()
+        if (candidates.size > 1 && candidates[1].second >= best.second) return ObserveResult() // ambiguous: do not guess
+        val old = best.first
+        val subject = IS_SPLIT.matchEntire(old.content)!!.groupValues[1]
+        val content = "$subject is $value".take(MemoryLimits.MAX_CONTENT_CHARS)
+        if (SensitivityGuard.check(content).level != Sensitivity.OK) return ObserveResult(blocked = 1)
+        if (content.equals(old.content, ignoreCase = true)) return ObserveResult(duplicates = 1, summary = old.content)
+        write(s, old.copy(content = content, confidence = 1.0, updatedAt = clock()))
+        return ObserveResult(updated = 1, summary = content)
+    }
 
     /** Writes a record and reads it straight back; a write that did not stick throws, so it can never be reported as done. */
     private fun write(s: MemoryStorage, m: Memory) {
@@ -125,14 +190,14 @@ class MemoryService(
         if (existing != null) {
             if (same(existing, c)) {
                 write(s, existing.copy(updatedAt = now))
-                return ObserveResult(duplicates = 1)
+                return ObserveResult(duplicates = 1, summary = existing.content)
             }
             write(s, existing.copy(content = c.content, confidence = maxOf(existing.confidence, c.confidence), updatedAt = now))
-            return ObserveResult(updated = 1)
+            return ObserveResult(updated = 1, summary = c.content)
         }
         if (active.size >= MemoryLimits.MAX_MEMORIES) return ObserveResult(full = true)
         write(s, newMemory(c, MemorySource.AUTO, MemoryStatus.ACTIVE, now))
-        return ObserveResult(saved = 1)
+        return ObserveResult(saved = 1, summary = c.content)
     }
 
     private fun propose(s: MemoryStorage, all: List<Memory>, c: Candidate, reason: String, replacesId: String?, now: Long): ObserveResult {
@@ -263,6 +328,8 @@ class MemoryService(
     }.trimEnd()
 
     companion object {
+        private val IS_SPLIT = Regex("""^(.{2,40}?)\s+is\s+(.{1,200})$""")
+        private val CORRECTABLE = setOf(MemoryCategory.FAVOURITE, MemoryCategory.TECH, MemoryCategory.PERSONAL, MemoryCategory.PREFERENCE, MemoryCategory.OTHER)
         const val MAX_ITEMS = 5
         const val MAX_STANDING = 2
         const val MAX_CHARS = 700

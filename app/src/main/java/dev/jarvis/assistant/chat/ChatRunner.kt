@@ -8,6 +8,8 @@ import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.ai.ResetFormat
 import dev.jarvis.assistant.ai.ResetSource
+import dev.jarvis.assistant.ai.ChatRole
+import dev.jarvis.assistant.memory.ChatTurn
 import dev.jarvis.assistant.memory.MemoryStatusNote
 import dev.jarvis.assistant.providers.QuotaLedger
 import dev.jarvis.assistant.settings.AiProvider
@@ -75,6 +77,8 @@ data class ChatUiState(
     val simulationArmed: Boolean = false,
     /** Which adapter really handled the latest attempt. Null until an adapter has been invoked. */
     val dispatch: DispatchInfo? = null,
+    /** What memory just did with the latest message, written by the app itself (not by the AI). */
+    val memoryNotice: String? = null,
 )
 
 enum class SendResult { ACCEPTED, EMPTY, BUSY }
@@ -300,20 +304,25 @@ class ChatRunner(
     private suspend fun runGeneration(userText: String?) {
         try {
             if (userText != null) {
+                val recent = _state.value.conversation.messages.takeLast(6).map { ChatTurn(it.role == ChatRole.USER, it.text) }
                 val withUser = withContext(io) { engine.addUserMessage(_state.value.conversation, userText) }
                 _state.update { it.copy(conversation = withUser) }
                 // Remembering happens BEFORE the reply is requested, so the reply is based on what really happened:
                 // the AI is given the true result and can only claim a save that is in the database. It is bounded
                 // by a timeout and can never fail the chat.
-                memoryNote = withContext(io) {
+                _state.update { it.copy(memoryNotice = null) }
+                val outcome = withContext(io) {
                     try {
-                        withTimeoutOrNull(MEMORY_TIMEOUT_MS) { memoryObserver.onUserMessage(userText) } ?: MemoryStatusNote.UNKNOWN
+                        withTimeoutOrNull(MEMORY_TIMEOUT_MS) { memoryObserver.onUserMessage(userText, recent) }
+                            ?: MemoryOutcome(MemoryStatusNote.UNKNOWN, "Memory: did not finish. Check the Memory screen.")
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        MemoryStatusNote.UNKNOWN // memory text is never logged
+                        MemoryOutcome(MemoryStatusNote.UNKNOWN, "Memory: did not finish. Check the Memory screen.") // never logged
                     }
                 }
+                memoryNote = outcome.note
+                _state.update { it.copy(memoryNotice = outcome.notice) }
             }
             loop()
             refreshHistory()
