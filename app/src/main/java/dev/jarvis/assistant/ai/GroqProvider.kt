@@ -121,7 +121,7 @@ class GroqProvider(
             var gotText = false
             val reader = conn.inputStream.bufferedReader(Charsets.UTF_8)
             while (true) {
-                val line = reader.readLine() ?: break
+                val line = reader.readBoundedLine() ?: break
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
                 if (payload.isEmpty()) continue
@@ -158,7 +158,7 @@ class GroqProvider(
         try {
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val entry = GroqParsing.findModel(body, model)
                 ?: throw call.failed(status, null, "the model is not in the provider's model list", LlmError.ModelNotFound(model))
             if (!entry.active) {
@@ -184,7 +184,7 @@ class GroqProvider(
 
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, request.model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val text = GroqParsing.messageText(body)
             if (text.isEmpty()) throw call.failed(status, null, "no text returned", LlmError.Blocked("the model returned no text"))
             call.ok(status, limitsNote(conn))

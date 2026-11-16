@@ -343,4 +343,105 @@ class MemoryRegressionTest {
         assertNull(MemoryExtractor.correctionValue("it's late now"))
         assertNull(MemoryExtractor.correctionValue("it's raining now"))
     }
+
+    // ------------------------------------------------------------------ Build 41: facts about other people (audit MEM-01)
+
+    @Test fun explicitFactsAboutOtherPeopleWaitForApprovalAndAreNotActive() = runBlocking {
+        for (sentence in listOf(
+            "Remember that my wife likes roses",
+            "Remember that my boss is called Raj and he is rude",
+            "Remember that my friend Ankit owes me money",
+            "Remember that my brother has asthma",
+        )) {
+            file.delete() // a fresh database for each sentence
+            val s = service()
+            val r = s.observe(sentence)
+            assertEquals(sentence, 0, r.saved)
+            assertEquals(sentence, 1, r.proposed)
+            val reopened = service()
+            assertTrue("$sentence must not be active", runBlocking { reopened.active() }.isEmpty())
+            val pending = runBlocking { reopened.pending() }
+            assertEquals(sentence, 1, pending.size)
+            assertEquals(MemoryStatus.PENDING, pending.single().status)
+            // The Memory screen reads the same list as the service state.
+            runBlocking { reopened.refresh() }
+            assertEquals(1, reopened.memories.value.count { it.status == MemoryStatus.PENDING })
+        }
+    }
+
+    @Test fun approvingAThirdPartyFactMakesItActiveAndDismissingRemovesIt() = runBlocking {
+        val s = service()
+        s.observe("Remember that my wife likes roses")
+        val id = s.pending().single().id
+        s.approve(id)
+        val after = service()
+        assertEquals(1, after.active().size)
+        assertTrue(after.pending().isEmpty())
+        s.observe("Remember that my boss is called Raj")
+        val id2 = after.pending().single().id
+        after.dismiss(id2)
+        assertTrue(service().pending().isEmpty())
+        assertEquals(1, service().active().size)
+    }
+
+    @Test fun theUsersOwnFactsAreStillSavedDirectly() = runBlocking {
+        val s = service()
+        assertEquals(1, s.observe("My favourite colour is blue").saved)
+        assertEquals(1, s.observe("Remember that I hate mornings").saved)
+        assertEquals(2, service().active().size)
+    }
+
+    // ------------------------------------------------------------------ Build 41: negation (audit MEM-02)
+
+    @Test fun aNegatedStatementIsNotSilentlyIgnoredAsADuplicate() = runBlocking {
+        val s = service()
+        assertEquals(1, s.observe("My favourite colour is blue").saved)
+        val r = s.observe("My favourite colour is not blue")
+        assertEquals(0, r.duplicates)
+        assertEquals(1, r.updated)
+        val after = contents(service())
+        assertEquals(1, after.size)
+        assertTrue(after.single(), after.single().contains("not blue", ignoreCase = true))
+    }
+
+    // ------------------------------------------------------------------ Build 41: all-or-nothing writes (audit MEM-04)
+
+    /** Real SQLite that throws when [failWhen] matches a statement. */
+    private class FailingSql(private val inner: Sql, private val failWhen: (String) -> Boolean) : Sql by inner {
+        override fun exec(sql: String, vararg args: Any?) {
+            if (failWhen(sql)) throw java.sql.SQLException("injected failure")
+            inner.exec(sql, *args)
+        }
+    }
+
+    private fun failingService(failWhen: (String) -> Boolean) =
+        MemoryService({ SqlMemoryStorage(FailingSql(JdbcSql(DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}")), failWhen)) }, io = Dispatchers.Unconfined)
+
+    @Test fun approvingAnUpdateProposalIsAllOrNothing() = runBlocking {
+        val s = service()
+        s.observe("My favourite colour is blue")
+        s.observe("I think my favourite colour is red")                  // unsure: becomes a proposal to update
+        val pending = s.pending().single()
+        assertEquals(MemoryStatus.PENDING, pending.status)
+
+        val broken = failingService { it.startsWith("DELETE FROM memories WHERE") }   // fails after the old record was changed
+        broken.approve(pending.id)
+
+        val reopened = service()
+        assertTrue("the old record is unchanged", reopened.active().single().content.contains("blue", ignoreCase = true))
+        assertEquals("the proposal is still waiting", 1, reopened.pending().size)
+
+        reopened.approve(pending.id)                                     // and it still works when storage is healthy
+        assertTrue(service().active().single().content.contains("red", ignoreCase = true))
+        assertTrue(service().pending().isEmpty())
+    }
+
+    @Test fun aFailedWriteIsReportedAsFailedAndLeavesNothingBehind() = runBlocking {
+        val broken = failingService { it.startsWith("INSERT OR REPLACE") }
+        val r = broken.observe("My favourite colour is blue")
+        assertTrue(r.failed)
+        assertEquals(0, r.saved)
+        assertTrue(service().active().isEmpty())
+        assertEquals(1, service().observe("My favourite colour is blue").saved)    // later saves work normally
+    }
 }

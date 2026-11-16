@@ -1,7 +1,11 @@
 package dev.jarvis.assistant.chat
 
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 interface ChatStorage {
     fun save(conversation: Conversation)
@@ -24,10 +28,24 @@ class FileChatStorage(private val dir: File, private val maxConversations: Int =
             dir.mkdirs()
             val target = fileFor(conversation.id)
             val tmp = File(dir, target.name + ".tmp")
-            tmp.writeText(ChatCodec.encode(conversation))
-            if (!tmp.renameTo(target)) {
-                target.delete()
-                if (!tmp.renameTo(target)) throw IOException("Couldn't save the conversation")
+            // Leftovers of an earlier crash (a temp file that never became the real file) are removed first.
+            dir.listFiles { f -> f.name.endsWith(".tmp") }?.forEach { it.delete() }
+            // Write and flush to disk BEFORE the replace, then replace in one atomic step. The old file is never
+            // deleted first, so a crash at any point leaves either the old or the new complete version.
+            FileOutputStream(tmp).use { out ->
+                out.write(ChatCodec.encode(conversation).toByteArray(Charsets.UTF_8))
+                out.flush()
+                out.fd.sync()
+            }
+            try {
+                try {
+                    Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+                } catch (e: AtomicMoveNotSupportedException) {
+                    Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+            } catch (e: IOException) {
+                tmp.delete()
+                throw IOException("Couldn't save the conversation", e)
             }
             prune()
         }

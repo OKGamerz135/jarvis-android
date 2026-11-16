@@ -7,6 +7,9 @@ interface MemoryStorage {
     fun upsert(m: Memory)
     fun delete(id: String)
     fun deleteAll()
+
+    /** Runs [block] so that either all of its writes happen or none do. Storage without transactions just runs it. */
+    fun <T> transaction(block: () -> T): T = block()
 }
 
 /** Used in tests and as a safe stand-in. */
@@ -80,6 +83,8 @@ class SqlMemoryStorage(private val sql: Sql) : MemoryStorage {
     override fun delete(id: String) = sql.exec("DELETE FROM memories WHERE id = ?", id)
 
     override fun deleteAll() = sql.exec("DELETE FROM memories")
+
+    override fun <T> transaction(block: () -> T): T = sql.inTransaction(block)
 
     companion object {
         const val VERSION = 1

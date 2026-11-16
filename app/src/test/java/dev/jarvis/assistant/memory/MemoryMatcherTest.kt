@@ -19,4 +19,12 @@ class MemoryMatcherTest {
         assertTrue(MemoryMatcher.score(mem("Favourite colour is orange", "favourite colour"), q) >= 1.0)
         assertEquals(0.0, MemoryMatcher.score(mem("Uses an iQOO 13 phone", "my phone"), q), 1e-9)
     }
+
+    @Test fun aStatementAndItsNegationAreNotDuplicates() {
+        assertEquals(0.0, MemoryMatcher.similarity("Favourite colour is blue", "Favourite colour is not blue"), 0.0)
+        assertEquals(0.0, MemoryMatcher.similarity("Likes spicy food", "Doesn't like spicy food"), 0.0)
+        assertEquals(0.0, MemoryMatcher.similarity("Lives in Pune", "No longer lives in Pune"), 0.0)
+        assertTrue(MemoryMatcher.similarity("Favourite colour is not blue", "Favourite colour is not blue") >= 0.99)
+        assertTrue(MemoryMatcher.similarity("Favourite colour is blue", "favourite colour is blue") >= 0.99)
+    }
 }

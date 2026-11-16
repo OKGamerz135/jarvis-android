@@ -126,7 +126,7 @@ class OpenRouterProvider(
         try {
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, OpenRouterParsing.AUTO, enrich = false)
-            val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             call.ok(status)
             text
         } catch (e: IOException) {
@@ -143,7 +143,7 @@ class OpenRouterProvider(
         try {
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, "key info", enrich = false)
-            val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val q = OpenRouterParsing.parseKey(text)
                 ?: throw call.failed(status, null, "no free-model counter in the reply", LlmError.Other("OpenRouter's key info had no free-model counter."))
             call.ok(status, "free requests used ${q.used} of ${q.limit}")
@@ -214,7 +214,7 @@ class OpenRouterProvider(
                 var gotText = false
                 val reader = conn.inputStream.bufferedReader(Charsets.UTF_8)
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = reader.readBoundedLine() ?: break
                     // Lines starting with ":" are keepalive comments (": OPENROUTER PROCESSING"); only "data:" matters.
                     if (!line.startsWith("data:")) continue
                     val payload = line.removePrefix("data:").trim()
@@ -291,7 +291,7 @@ class OpenRouterProvider(
 
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, model, enrich = true, apiKey = request.apiKey)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             when (val r = OpenRouterParsing.messageResult(body)) {
                 is OpenRouterParsing.StreamItem.Text -> {
                     call.ok(status, "free model")

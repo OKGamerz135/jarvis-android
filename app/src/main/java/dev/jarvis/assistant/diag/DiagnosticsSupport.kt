@@ -145,3 +145,20 @@ object UsageGuard {
         return (COOLDOWN_MS - (nowMillis - last)).coerceIn(0L, COOLDOWN_MS)
     }
 }
+
+/**
+ * Last line of defence: whatever a provider adapter hands to the log is cleaned once more here, so a call site that
+ * forgot to redact (or a new provider added later) still cannot write a recognisable key to the diagnostics.
+ */
+class RedactingSink(private val inner: DiagnosticsSink) : DiagnosticsSink {
+    override fun record(entry: DiagnosticEntry) {
+        inner.record(
+            entry.copy(
+                model = Redactor.clean(entry.model, maxLen = 120),
+                endpoint = Redactor.clean(entry.endpoint, maxLen = 240),
+                apiStatus = entry.apiStatus?.let { Redactor.clean(it, maxLen = 120) },
+                message = entry.message?.let { Redactor.clean(it, maxLen = 320) },
+            ),
+        )
+    }
+}

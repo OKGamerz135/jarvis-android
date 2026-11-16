@@ -2,10 +2,11 @@ package dev.jarvis.assistant.settings
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
-import android.util.Base64
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.UnrecoverableKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -15,40 +16,49 @@ import javax.crypto.spec.GCMParameterSpec
  * Keeps API keys encrypted (AES-GCM) with a key that lives inside Android's hardware-backed
  * Keystore and can't be exported. Only the encrypted text is written to app storage.
  * The app has backups switched off, so keys never leave the phone through cloud backup.
+ * The save / read / delete rules live in [SecretVault] (unit-tested); this class only supplies Android's pieces.
+ * Call these from a background thread: writes wait until they are on disk.
  */
 class SecureKeyStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("secure_keys", Context.MODE_PRIVATE)
 
-    fun has(name: String): Boolean = prefs.contains(name)
+    private val vault = SecretVault(
+        crypto = object : SecretCrypto {
+            override fun encrypt(plain: ByteArray): ByteArray {
+                val cipher = Cipher.getInstance(TRANSFORMATION)
+                cipher.init(Cipher.ENCRYPT_MODE, key())
+                return cipher.iv + cipher.doFinal(plain)
+            }
 
-    fun save(name: String, secret: String) {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key())
-        val encrypted = cipher.doFinal(secret.toByteArray(Charsets.UTF_8))
-        val packed = cipher.iv + encrypted
-        prefs.edit().putString(name, Base64.encodeToString(packed, Base64.NO_WRAP)).apply()
-    }
+            override fun decrypt(packed: ByteArray): ByteArray {
+                try {
+                    val cipher = Cipher.getInstance(TRANSFORMATION)
+                    cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, packed, 0, IV_BYTES))
+                    return cipher.doFinal(packed, IV_BYTES, packed.size - IV_BYTES)
+                } catch (e: KeyPermanentlyInvalidatedException) {
+                    throw SecretUnreadableException("The Keystore key was invalidated", e)
+                } catch (e: UnrecoverableKeyException) {
+                    throw SecretUnreadableException("The Keystore key can't be recovered", e)
+                }
+            }
+        },
+        store = object : SecretStore {
+            override fun get(name: String): String? = prefs.getString(name, null)
+            override fun contains(name: String): Boolean = prefs.contains(name)
+            override fun put(name: String, value: String): Boolean = prefs.edit().putString(name, value).commit()
+            override fun remove(name: String): Boolean = prefs.edit().remove(name).commit()
+        },
+    )
 
-    /** Returns null when there is no key, or when it can't be decrypted (then it is discarded). */
-    fun read(name: String): String? {
-        val packed = prefs.getString(name, null) ?: return null
-        return try {
-            val bytes = Base64.decode(packed, Base64.NO_WRAP)
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, bytes, 0, IV_BYTES))
-            String(cipher.doFinal(bytes, IV_BYTES, bytes.size - IV_BYTES), Charsets.UTF_8)
-        } catch (e: GeneralSecurityException) {
-            remove(name)
-            null
-        } catch (e: IllegalArgumentException) {
-            remove(name)
-            null
-        }
-    }
+    fun has(name: String): Boolean = vault.has(name)
 
-    fun remove(name: String) {
-        prefs.edit().remove(name).apply()
-    }
+    /** True only when the encrypted key is on disk. */
+    fun save(name: String, secret: String): Boolean = vault.save(name, secret)
+
+    /** Returns null when there is no key or it can't be read right now. A key is deleted only if it can never be read again. */
+    fun read(name: String): String? = vault.read(name)
+
+    fun remove(name: String): Boolean = vault.remove(name)
 
     private fun key(): SecretKey {
         val keyStore = KeyStore.getInstance(PROVIDER).apply { load(null) }

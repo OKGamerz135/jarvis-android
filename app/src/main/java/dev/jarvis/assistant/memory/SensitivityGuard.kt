@@ -51,8 +51,13 @@ object SensitivityGuard {
     )
     private val LEGAL = Regex("""(?i)\b(arrested|convicted|criminal record|lawsuit|sued|jail|prison)\b""")
     private val ADDRESS = Regex("""(?i)\b(i live at|my (?:home |street |house )?address|my phone number|my number is|my email is|my home is at)\b""")
+    // Facts about someone else need the user's approval. The extractor words the user's own facts in the third person
+    // ("Their phone is ...", "Their wife likes ..."), so "their/his/her" count as possessives too, and a relation
+    // anywhere in the text counts, not only at the start (for example "Favourite movie is X, my mom hates it").
+    private const val RELATIONS =
+        "friends?|mom|mother|dad|father|wife|husband|boss|sister|brother|girlfriend|boyfriend|partner|colleague|coworker|co-worker|neighbou?r|roommate|teacher|son|daughter|cousin|uncle|aunt|ex|crush"
     private val OTHER_PERSON = Regex(
-        """(?i)^\W*(?:remember that |note that )?(?:my |our )?(friend|friends|mom|mother|dad|father|wife|husband|boss|sister|brother|girlfriend|boyfriend|partner|colleague|coworker|co-worker|neighbou?r|roommate|teacher|son|daughter|cousin|uncle|aunt|ex|crush)\b""",
+        """(?i)(?:\b(?:my|our|their|his|her)\s+(?:$RELATIONS)\b|^\W*(?:remember that |note that )?(?:$RELATIONS)\b)""",
     )
 
     fun check(text: String): Verdict {

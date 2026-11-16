@@ -42,8 +42,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun saveKey(provider: AiProvider, key: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                keys.save(provider.keyName, key.filterNot { it.isWhitespace() })
-                _notice.value = "Key saved."
+                val stored = keys.save(provider.keyName, key.filterNot { it.isWhitespace() })
+                _notice.value = if (stored) "Key saved." else "Couldn't save the key: the phone didn't write it to storage. Nothing was changed."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -56,8 +56,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun removeKey(provider: AiProvider) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                keys.remove(provider.keyName)
-                _notice.value = "Key removed."
+                val removed = keys.remove(provider.keyName)
+                _notice.value = if (removed) "Key removed." else "Couldn't remove the key: the phone didn't write the change. Try again."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -5,9 +5,23 @@ package dev.jarvis.assistant.diag
  * Used on every error message, endpoint and model name that reaches the diagnostics log.
  */
 object Redactor {
+    /** Marker text that replaced a secret. Tests and the sink use it to recognise redacted output. */
+    const val KEY_MARK = "[key]"
+
     private val googleKey = Regex("AIza[0-9A-Za-z_\\-]{20,}")
     private val groqKey = Regex("gsk_[0-9A-Za-z]{16,}")
     private val bearer = Regex("(?i)bearer\\s+[0-9A-Za-z._\\-]{8,}")
+
+    // Other providers' key shapes: OpenAI-style and OpenRouter (sk-, sk-or-v1-), Cloudflare (cfut_, cfat_, cfk_),
+    // GitHub tokens, Slack tokens, and Z.ai's "<32 hex>.<secret>" form.
+    private val skKey = Regex("\\bsk-[A-Za-z0-9_\\-]{12,}")
+    private val cloudflareKey = Regex("\\bcf[a-z]{1,3}_[A-Za-z0-9_\\-]{16,}")
+    private val githubKey = Regex("\\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})")
+    private val slackKey = Regex("\\bxox[abprs]-[A-Za-z0-9\\-]{10,}")
+    private val zaiKey = Regex("\\b[0-9a-fA-F]{32}\\.[A-Za-z0-9_\\-]{8,}")
+
+    // "api_key=...", "token: ...", "?key=..." where the value looks like a credential (12+ token characters).
+    private val assignedSecret = Regex("(?i)\\b(api[_\\-]?key|apikey|access[_\\-]?token|auth[_\\-]?token|token|secret|password|passwd|authorization|key)(\\s*[=:]\\s*\"?)[A-Za-z0-9._~+/=\\-]{12,}")
     private val email = Regex("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}")
     private val project = Regex("projects/\\d+")
     private val org = Regex("\\borg_[0-9A-Za-z]+")
@@ -24,10 +38,18 @@ object Redactor {
         var t = tags.replace(text, " ")
         for (secret in secrets) {
             if (secret.length >= 8) t = t.replace(secret, "[key]")
+            // A provider may echo only part of a two-part key, so long pieces are removed on their own too.
+            for (part in secret.split('.', '-', ':', '/')) if (part.length >= 16) t = t.replace(part, "[key]")
         }
         t = googleKey.replace(t, "[key]")
         t = groqKey.replace(t, "[key]")
         t = bearer.replace(t, "Bearer [key]")
+        t = skKey.replace(t, "[key]")
+        t = cloudflareKey.replace(t, "[key]")
+        t = githubKey.replace(t, "[key]")
+        t = slackKey.replace(t, "[key]")
+        t = zaiKey.replace(t, "[key]")
+        t = assignedSecret.replace(t) { m -> m.groupValues[1] + m.groupValues[2] + "[key]" }
         t = email.replace(t, "[email]")
         t = project.replace(t, "projects/[id]")
         t = org.replace(t, "org_[id]")

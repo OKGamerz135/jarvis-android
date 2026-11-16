@@ -5,6 +5,7 @@ import dev.jarvis.assistant.diag.DiagnosticEntry
 import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.diag.DiagnosticsSink
 import dev.jarvis.assistant.diag.NoopSink
+import dev.jarvis.assistant.diag.RedactingSink
 import dev.jarvis.assistant.diag.Redactor
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.Dispatchers
@@ -129,7 +130,7 @@ class GeminiProvider(
             var gotText = false
             val reader = conn.inputStream.bufferedReader(Charsets.UTF_8)
             while (true) {
-                val line = reader.readLine() ?: break
+                val line = reader.readBoundedLine() ?: break
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
                 if (payload.isEmpty()) continue
@@ -166,7 +167,7 @@ class GeminiProvider(
         try {
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, status, readErrorBody(conn), model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val info = GeminiParsing.parseModelInfo(body, model)
             call.ok(status)
             info
@@ -188,7 +189,7 @@ class GeminiProvider(
 
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, status, readErrorBody(conn), request.model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val text = try {
                 GeminiParsing.textOf(body)
             } catch (e: LlmException) {
@@ -244,11 +245,11 @@ class GeminiProvider(
 }
 
 object Providers {
-    private val gemini = GeminiProvider(DiagnosticsLog)
-    private val groq = GroqProvider(DiagnosticsLog)
-    private val openRouter = OpenRouterProvider(DiagnosticsLog)
-    private val cloudflare = CloudflareProvider(DiagnosticsLog)
-    private val zai = ZaiProvider(DiagnosticsLog)
+    private val gemini = GeminiProvider(RedactingSink(DiagnosticsLog))
+    private val groq = GroqProvider(RedactingSink(DiagnosticsLog))
+    private val openRouter = OpenRouterProvider(RedactingSink(DiagnosticsLog))
+    private val cloudflare = CloudflareProvider(RedactingSink(DiagnosticsLog))
+    private val zai = ZaiProvider(RedactingSink(DiagnosticsLog))
 
     fun openRouter(): OpenRouterProvider = openRouter
 
