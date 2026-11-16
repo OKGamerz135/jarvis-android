@@ -10,5 +10,6 @@ The first install is manual (download `jarvis.apk` from the latest release). Aft
 
 ## Notes
 
-- `app/jarvis.jks` is a committed signing key. It exists so new builds can install over old ones.
-  Personal sideloading only; never use it for anything distributed.
+- The old signing key that used to live in this repository is public and **must not be trusted**. Builds from Build 41
+  on are signed with a new key kept outside the repository. Moving to it needs a clean install: uninstall the old
+  JARVIS first (its chats, memories and saved keys are deleted with it). See `docs/SIGNING.md`.
