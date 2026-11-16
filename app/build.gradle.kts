@@ -39,6 +39,7 @@ android {
                 val keystore = file(System.getenv("JARVIS_KEYSTORE_FILE"))
                 if (!keystore.isFile) throw GradleException("JARVIS_KEYSTORE_FILE does not point to a file.")
                 storeFile = keystore
+                storeType = "pkcs12" // production and test keys are PKCS12; never guess the format from the file
                 storePassword = System.getenv("JARVIS_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("JARVIS_KEY_ALIAS")
                 keyPassword = System.getenv("JARVIS_KEY_PASSWORD")

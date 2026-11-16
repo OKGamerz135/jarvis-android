@@ -15,6 +15,11 @@ on:
   push:
     branches: [main]
     paths-ignore: ['**.md']
+  # Validation only: tests, hygiene checks, throwaway-key builds and the emulator matrix. A pull request never reaches
+  # release-build or publish (both require a push to main), so it can neither read the production environment's
+  # secrets nor create a release. Pull requests from forks get a read-only token and no secrets from GitHub as well.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}
@@ -99,7 +104,7 @@ jobs:
             pw="$(openssl rand -hex 16)"
             echo "::add-mask::$pw"
             echo "${k^^}_PW=$pw" >> "$GITHUB_ENV"
-            keytool -genkeypair -keystore "$RUNNER_TEMP/dev/$k.jks" -storetype PKCS12 -storepass "$pw" -keypass "$pw" \
+            keytool -genkeypair -keystore "$RUNNER_TEMP/dev/$k.p12" -storetype PKCS12 -storepass "$pw" -keypass "$pw" \
               -alias dev -keyalg RSA -keysize 2048 -validity 2 -dname "CN=JARVIS throwaway $k" >/dev/null 2>&1
           done
 
@@ -107,7 +112,7 @@ jobs:
         run: |
           set -eu
           chmod +x gradlew
-          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.jks" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.p12" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
           ./gradlew --no-daemon assembleRelease
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/A.apk
@@ -119,14 +124,14 @@ jobs:
           set -eu
           APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           echo "apksigner: $APKSIGNER"
-          "$APKSIGNER" sign --ks "$RUNNER_TEMP/dev/key2.jks" --ks-pass env:KEY2_PW --key-pass env:KEY2_PW --ks-key-alias dev \
+          "$APKSIGNER" sign --ks "$RUNNER_TEMP/dev/key2.p12" --ks-pass env:KEY2_PW --key-pass env:KEY2_PW --ks-key-alias dev \
             --out dist/C.apk dist/B.apk
 
       - name: Verify signatures and that env-based signing used key1
         run: |
           set -eu
           APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
-          want="$(keytool -list -v -keystore "$RUNNER_TEMP/dev/key1.jks" -storepass "$KEY1_PW" 2>/dev/null | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
+          want="$(keytool -list -v -keystore "$RUNNER_TEMP/dev/key1.p12" -storepass "$KEY1_PW" 2>/dev/null | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
           for f in A B C; do
             "$APKSIGNER" verify --print-certs -v "dist/$f.apk" > "dist/$f.certs.txt"
             grep -E 'Verified using v[0-9.]+ scheme.*true' "dist/$f.certs.txt"
@@ -245,15 +250,20 @@ jobs:
         run: |
           set -eu
           umask 077
-          printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/release.p12"
+          # Fail early and clearly if this is not a PKCS12 store, the password is wrong or the alias is missing.
+          # (-storepass:env keeps the password out of the process list and the log.)
+          keytool -list -storetype PKCS12 -keystore "$JARVIS_KEYSTORE_FILE" \
+            -storepass:env JARVIS_KEYSTORE_PASSWORD -alias "$JARVIS_KEY_ALIAS" >/dev/null \
+            || { echo "::error::Cannot open the PKCS12 keystore with this password and alias."; exit 1; }
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk jarvis.apk
 
       - name: Remove the keystore from the runner
         if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks"
+        run: rm -f "$RUNNER_TEMP/release.p12"
 
       - name: Verify the signer is the expected production certificate
         env:
@@ -278,6 +288,7 @@ jobs:
           retention-days: 7
 
   publish:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: release-build
     runs-on: ubuntu-latest
     permissions:
