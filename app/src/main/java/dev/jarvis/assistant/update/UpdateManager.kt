@@ -16,24 +16,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-sealed interface UpdateState {
-    data object Idle : UpdateState
-    data object Checking : UpdateState
-    data object UpToDate : UpdateState
-    data class Available(
-        val build: Int,
-        val versionName: String,
-        val url: String,
-        val sizeBytes: Long,
-    ) : UpdateState
-
-    /** progress is 0f..1f, or negative when the size is unknown. */
-    data class Downloading(val progress: Float) : UpdateState
-    data object Installing : UpdateState
-    data class NeedsPermission(val update: Available) : UpdateState
-    data class Error(val message: String) : UpdateState
-}
-
 /**
  * Checks the latest GitHub release of the project repo and installs it through
  * Android's PackageInstaller. Only contacts github.com, and only when the user
@@ -41,8 +23,7 @@ sealed interface UpdateState {
  * decides it can skip it.
  */
 object UpdateManager {
-    private const val ASSET_NAME = "jarvis.apk"
-    private const val TAG_PREFIX = "build-"
+    private val downloader = ApkDownloader()
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
@@ -83,26 +64,8 @@ object UpdateManager {
         }
     }
 
-    private fun parseRelease(json: JSONObject): UpdateState {
-        val tag = json.optString("tag_name")
-        val build = tag.removePrefix(TAG_PREFIX).toIntOrNull()
-            ?: return UpdateState.Error("Latest release has an unexpected tag: \"$tag\".")
-        if (build <= BuildConfig.VERSION_CODE) return UpdateState.UpToDate
-
-        val assets = json.optJSONArray("assets")
-        for (i in 0 until (assets?.length() ?: 0)) {
-            val asset = assets!!.getJSONObject(i)
-            if (asset.optString("name") == ASSET_NAME) {
-                return UpdateState.Available(
-                    build = build,
-                    versionName = "0.1.$build",
-                    url = asset.getString("browser_download_url"),
-                    sizeBytes = asset.optLong("size", -1L),
-                )
-            }
-        }
-        return UpdateState.Error("Release build $build has no $ASSET_NAME file attached.")
-    }
+    private fun parseRelease(json: JSONObject): UpdateState =
+        ReleaseParser.parse(json, BuildConfig.VERSION_CODE, BuildConfig.UPDATE_REPO)
 
     /** Streams the APK straight into an installer session, then asks Android to install it. */
     suspend fun install(context: Context, update: UpdateState.Available) = withContext(Dispatchers.IO) {
@@ -116,45 +79,22 @@ object UpdateManager {
         var sessionId = -1
         try {
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            if (update.sizeBytes > 0) params.setSize(update.sizeBytes)
+            params.setSize(update.sizeBytes)
             params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
             sessionId = installer.createSession(params)
 
             installer.openSession(sessionId).use { session ->
-                val conn = URL(update.url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 15_000
-                conn.readTimeout = 30_000
-                conn.setRequestProperty("User-Agent", "jarvis-android")
-                try {
-                    if (conn.responseCode != 200) {
-                        throw IOException("Download failed with HTTP ${conn.responseCode}.")
-                    }
-                    val total = if (update.sizeBytes > 0) update.sizeBytes else conn.contentLengthLong
-                    _state.value = UpdateState.Downloading(if (total > 0) 0f else -1f)
-
-                    conn.inputStream.use { input ->
-                        session.openWrite("jarvis.apk", 0, total).use { out ->
-                            val buffer = ByteArray(64 * 1024)
-                            var copied = 0L
-                            var lastPercent = -1
-                            while (true) {
-                                val n = input.read(buffer)
-                                if (n < 0) break
-                                out.write(buffer, 0, n)
-                                copied += n
-                                if (total > 0) {
-                                    val percent = (copied * 100 / total).toInt()
-                                    if (percent != lastPercent) {
-                                        lastPercent = percent
-                                        _state.value = UpdateState.Downloading(copied.toFloat() / total)
-                                    }
-                                }
-                            }
-                            session.fsync(out)
+                _state.value = UpdateState.Downloading(0f)
+                session.openWrite("jarvis.apk", 0, update.sizeBytes).use { out ->
+                    var lastPercent = -1
+                    downloader.download(update.url, update.sizeBytes, update.sha256, out) { copied ->
+                        val percent = (copied * 100 / update.sizeBytes).toInt()
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            _state.value = UpdateState.Downloading(copied.toFloat() / update.sizeBytes)
                         }
                     }
-                } finally {
-                    conn.disconnect()
+                    session.fsync(out)
                 }
 
                 _state.value = UpdateState.Installing

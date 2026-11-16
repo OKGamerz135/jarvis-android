@@ -23,7 +23,15 @@ object MemoryMatcher {
         else -> w
     }
 
+    private val NEGATION = Regex("""(?i)\b(?:not|no|never|none|nothing|neither|nor|cannot|without)\b|n't\b""")
+
+    /** "is blue" and "is not blue" share every word but say opposite things. */
+    private fun negated(text: String): Boolean = NEGATION.containsMatchIn(text)
+
     fun similarity(a: String, b: String): Double {
+        // Negation words are not tokens (they are stop words), so compare them separately: a statement and its
+        // negation are never duplicates of each other.
+        if (negated(a) != negated(b)) return 0.0
         val x = tokens(a)
         val y = tokens(b)
         if (x.isEmpty() || y.isEmpty()) return if (a.trim().equals(b.trim(), ignoreCase = true)) 1.0 else 0.0

@@ -34,4 +34,22 @@ class SensitivityGuardTest {
         assertEquals(Sensitivity.NEEDS_APPROVAL, level("my friend Rahul is getting divorced"))
         assertEquals(Sensitivity.NEEDS_APPROVAL, level("I live at 12 MG Road, Pune"))
     }
+
+    @Test fun factsAboutOtherPeopleNeedApprovalInEveryWording() {
+        for (t in listOf(
+            "Their wife likes roses",
+            "Their boss is called Raj and he is rude",
+            "Their friend Ankit owes me money",
+            "Favourite movie is Inception, my mom hates it",
+            "my wife likes roses",
+            "friend Rahul is getting divorced",
+            "His brother lives in Pune",
+        )) assertEquals(t, Sensitivity.NEEDS_APPROVAL, level(t))
+    }
+
+    @Test fun ordinaryFactsAboutTheUserAreStillOk() {
+        for (t in listOf("Favourite colour is blue", "Their phone is an iQOO 13", "Name is Sam", "Goal: learn guitar", "Dislikes mornings", "Their teammate is called Sam")) {
+            assertEquals(t, Sensitivity.OK, level(t))
+        }
+    }
 }

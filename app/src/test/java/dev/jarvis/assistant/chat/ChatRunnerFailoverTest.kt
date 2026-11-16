@@ -78,7 +78,7 @@ class ChatRunnerFailoverTest {
         assertEquals(SendResult.ACCEPTED, r.send("hello"))
         val offer = r.until { it.failover != null }.failover!!
         assertEquals("Your current AI provider has exhausted its available quota. Switching to ${R.label} in 2 seconds.", offer.announcement)
-        assertTrue(offer.disclosure.contains("conversation so far will be sent to ${R.label}"))
+        assertTrue(offer.disclosure.contains("conversation so far, and any saved memories that are relevant to it, will be sent to ${R.label}"))
         val s = r.idle()
         assertEquals(1, a.calls.get())
         assertEquals(1, b.calls.get())

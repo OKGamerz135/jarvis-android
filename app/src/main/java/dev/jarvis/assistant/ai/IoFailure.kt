@@ -10,7 +10,9 @@ import java.net.SocketTimeoutException
  * the provider could not be reached at all, which is treated as offline.
  */
 fun ioFailure(e: IOException): LlmError =
-    if (e is SocketTimeoutException && e.message?.contains("connect", ignoreCase = true) != true) {
+    if (e is ResponseTooLargeException) {
+        LlmError.Other("The provider's reply was unreasonably large, so I stopped reading it.")
+    } else if (e is SocketTimeoutException && e.message?.contains("connect", ignoreCase = true) != true) {
         LlmError.Timeout("No answer from the provider before the time limit.")
     } else {
         LlmError.Offline

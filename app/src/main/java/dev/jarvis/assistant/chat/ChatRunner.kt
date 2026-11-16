@@ -48,7 +48,7 @@ data class FailoverOffer(
     val announcement: String
         get() = "Your current AI provider has exhausted its available quota. Switching to ${to.label} in $secondsLeft seconds."
     val disclosure: String
-        get() = "This conversation so far will be sent to ${to.label} (model $toModel). Your API keys never leave their own provider."
+        get() = "This conversation so far, and any saved memories that are relevant to it, will be sent to ${to.label} (model $toModel). Your API keys never leave their own provider."
 }
 
 data class ChatUiState(

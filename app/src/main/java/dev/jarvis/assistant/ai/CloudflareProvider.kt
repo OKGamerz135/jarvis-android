@@ -147,7 +147,7 @@ class CloudflareProvider(
                 val plain = StringBuilder() // a JSON body instead of an event stream (streaming not honoured)
                 val reader = conn.inputStream.bufferedReader(Charsets.UTF_8)
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = reader.readBoundedLine() ?: break
                     if (!line.startsWith("data:")) {
                         if (!line.startsWith(":") && line.isNotBlank() && plain.length < 200_000) plain.append(line).append('\n')
                         continue
@@ -204,7 +204,7 @@ class CloudflareProvider(
         try {
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val names = CloudflareParsing.modelNames(body)
             val seen = model in names
             call.ok(status, if (seen) "model listed" else "token accepted; model not on the first page of the catalog")
@@ -228,7 +228,7 @@ class CloudflareProvider(
 
             val status = conn.responseCode
             if (status != 200) throw httpFailure(call, conn, status, request.model)
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             when (val r = CloudflareParsing.messageResult(body)) {
                 is CloudflareParsing.Item.Text -> {
                     call.ok(status, "free allowance")

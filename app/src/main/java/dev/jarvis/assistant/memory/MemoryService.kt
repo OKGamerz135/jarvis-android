@@ -90,12 +90,16 @@ class MemoryService(
         if (a.candidates.isEmpty() && a.correction == null && !a.referencesPrevious) return ObserveResult(askedToSave = asked)
         // If storage fails the result says so ("failed"), so nothing is ever reported as saved when it was not.
         val r = safe(ObserveResult(failed = true)) { s ->
-            var r = ObserveResult()
-            for (c in a.candidates) r = add(r, applyCandidate(s, c))
-            if (a.candidates.isEmpty()) {
-                // Words that point backwards ("it's orange now", "save that") are resolved against the earlier turns.
-                if (a.correction != null) r = add(r, applyCorrection(s, a.correction, recent))
-                else if (a.referencesPrevious) r = add(r, resolveReference(s, recent))
+            // One transaction per message: if any write fails, none of this message's changes are kept.
+            val r = s.transaction {
+                var r = ObserveResult()
+                for (c in a.candidates) r = add(r, applyCandidate(s, c))
+                if (a.candidates.isEmpty()) {
+                    // Words that point backwards ("it's orange now", "save that") are resolved against the earlier turns.
+                    if (a.correction != null) r = add(r, applyCorrection(s, a.correction, recent))
+                    else if (a.referencesPrevious) r = add(r, resolveReference(s, recent))
+                }
+                r
             }
             publish(s)
             r
@@ -273,12 +277,15 @@ class MemoryService(
         safe(Unit) { s ->
             val p = s.get(id) ?: return@safe
             val now = clock()
-            val target = p.replacesId?.let { s.get(it) }
-            if (target != null) {
-                s.upsert(target.copy(content = p.content, confidence = 1.0, updatedAt = now))
-                s.delete(p.id)
-            } else {
-                s.upsert(p.copy(status = MemoryStatus.ACTIVE, reason = null, replacesId = null, confidence = 1.0, updatedAt = now))
+            // Changing the old record and removing the proposal happen together or not at all.
+            s.transaction {
+                val target = p.replacesId?.let { s.get(it) }
+                if (target != null) {
+                    s.upsert(target.copy(content = p.content, confidence = 1.0, updatedAt = now))
+                    s.delete(p.id)
+                } else {
+                    s.upsert(p.copy(status = MemoryStatus.ACTIVE, reason = null, replacesId = null, confidence = 1.0, updatedAt = now))
+                }
             }
             publish(s)
         }

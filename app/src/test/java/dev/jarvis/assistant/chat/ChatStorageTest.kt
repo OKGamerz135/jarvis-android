@@ -83,4 +83,57 @@ class ChatStorageTest {
         assertEquals("Hello there", Conversation.titleFrom("  Hello\n there "))
         assertTrue(Conversation.titleFrom("x".repeat(100)).length <= 41)
     }
+
+    // ------------------------------------------------------------------ Build 41: crash-safe writes (audit CHAT-02)
+
+    @Test fun aLeftoverTempFileFromACrashNeverReplacesTheRealConversation() {
+        val d = dir()
+        val st = FileChatStorage(d)
+        st.save(conv("a", 5, "hi", "hello"))
+        File(d, "a.json.tmp").writeText("{\"id\":\"a\",\"messages\":[")       // half-written file left by a crash
+        File(d, "zzz.json.tmp").writeText("garbage")
+        assertEquals(2, FileChatStorage(d).load("a")!!.messages.size)
+        assertEquals(1, FileChatStorage(d).list().size)
+        FileChatStorage(d).save(conv("a", 6, "hi", "hello", "again"))
+        assertEquals(3, FileChatStorage(d).load("a")!!.messages.size)
+        assertTrue("stale temp files are cleaned up", d.listFiles { f -> f.name.endsWith(".tmp") }!!.isEmpty())
+    }
+
+    @Test fun aReaderNeverSeesAHalfWrittenFileWhileSaving() {
+        val d = dir()
+        val st = FileChatStorage(d)
+        st.save(conv("a", 1, "start"))
+        val target = File(d, "a.json")
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val bad = java.util.concurrent.atomic.AtomicInteger(0)
+        val reader = Thread {
+            while (!stop.get()) {
+                val text = try { target.readText() } catch (e: java.io.IOException) { null }
+                if (text != null && ChatCodec.decode(text) == null) bad.incrementAndGet()
+            }
+        }
+        reader.start()
+        for (i in 2..150) st.save(conv("a", i.toLong(), *Array(1 + i % 20) { "message $it ".repeat(50) }))
+        stop.set(true); reader.join()
+        assertEquals("the real file was readable and complete every single time", 0, bad.get())
+    }
+
+    @Test fun concurrentSavesLeaveOneValidFile() {
+        val d = dir()
+        val st = FileChatStorage(d)
+        val threads = (1..12).map { t -> Thread { for (i in 1..25) st.save(conv("a", (t * 100 + i).toLong(), "from thread $t", "reply $i")) } }
+        threads.forEach { it.start() }; threads.forEach { it.join() }
+        assertNotNull(FileChatStorage(d).load("a"))
+        assertEquals(1, FileChatStorage(d).list().size)
+        assertTrue(d.listFiles { f -> f.name.endsWith(".tmp") }!!.isEmpty())
+    }
+
+    @Test fun aDamagedConversationFileDoesNotHideTheOthers() {
+        val d = dir()
+        val st = FileChatStorage(d)
+        st.save(conv("good", 5, "hi", "hello"))
+        File(d, "bad.json").writeText("{\"id\":\"bad\",\"messages\":[{\"id\":")   // truncated
+        assertNull(st.load("bad"))
+        assertEquals(listOf("good"), st.list().map { it.id })
+    }
 }

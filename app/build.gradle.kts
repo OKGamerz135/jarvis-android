@@ -23,25 +23,36 @@ android {
         buildConfigField("String", "UPDATE_REPO", "\"OKGamerz135/jarvis-android\"")
     }
 
-    // A fixed key is required so a new build can install over the old one.
-    // The keystore is committed on purpose: personal sideload only, not for the Play Store.
-    signingConfigs {
-        create("jarvis") {
-            storeFile = file("jarvis.jks")
-            storePassword = "jarvis-personal"
-            keyAlias = "jarvis"
-            keyPassword = "jarvis-personal"
+    // Release signing comes ONLY from the environment (GitHub Secrets in CI, or your own shell). Nothing secret is
+    // stored in this repository. With no signing variables the release APK is left unsigned, so it cannot be
+    // installed by accident. Setting only some of the variables is an error, so a half-configured build never
+    // silently falls back to something else.
+    val signingVars = listOf("JARVIS_KEYSTORE_FILE", "JARVIS_KEYSTORE_PASSWORD", "JARVIS_KEY_ALIAS", "JARVIS_KEY_PASSWORD")
+    val signingSet = signingVars.filter { !System.getenv(it).isNullOrBlank() }
+    if (signingSet.isNotEmpty() && signingSet.size != signingVars.size) {
+        throw GradleException("Incomplete release signing configuration. Missing: " + (signingVars - signingSet.toSet()).joinToString())
+    }
+    val hasReleaseSigning = signingSet.size == signingVars.size
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                val keystore = file(System.getenv("JARVIS_KEYSTORE_FILE"))
+                if (!keystore.isFile) throw GradleException("JARVIS_KEYSTORE_FILE does not point to a file.")
+                storeFile = keystore
+                storeType = "pkcs12" // production and test keys are PKCS12; never guess the format from the file
+                storePassword = System.getenv("JARVIS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("JARVIS_KEY_ALIAS")
+                keyPassword = System.getenv("JARVIS_KEY_PASSWORD")
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("jarvis")
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
         }
-        debug {
-            signingConfig = signingConfigs.getByName("jarvis")
-        }
+        // Debug builds use Android's own per-machine debug key. They are never published.
     }
 
     buildFeatures {
