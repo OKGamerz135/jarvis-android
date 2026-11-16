@@ -6,3 +6,16 @@ local.properties
 .DS_Store
 captures/
 .kotlin/
+
+# Signing material must never be committed. Production keys come from GitHub Secrets / the environment.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.der
+*.p8
+*.key
+keystore.properties
+signing.properties
+signing/

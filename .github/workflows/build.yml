@@ -1,51 +1,301 @@
 name: Build APK
 
+# Jobs, from least to most privileged:
+#   test           read-only token, no secrets: hygiene checks + unit tests
+#   dev-build      read-only token, no secrets: builds with THROWAWAY keys generated inside the job (any branch)
+#   install-matrix read-only token, no secrets: real emulators on Android 12, 12L, 13, 16: clean install, update, refusals
+#   release-build  main only, "production" environment: the ONLY job that sees the signing secrets; read-only token
+#   publish        main only: the ONLY job with a write token; sees no secrets and never runs Gradle
+#
+# Release rules: nothing is published unless the tests passed, the APK is signed by the expected production
+# certificate (repository variable JARVIS_CERT_SHA256), and the file that is published is byte-identical to the one
+# that was built. Without the production secrets the release jobs fail and nothing is published.
+
 on:
   push:
     branches: [main]
     paths-ignore: ['**.md']
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Build 40, the last build signed with the old (compromised) key. Used only to prove the clean-install path.
+  BUILD40_URL: https://github.com/OKGamerz135/jarvis-android/releases/download/build-40/jarvis.apk
+  BUILD40_SHA256: cceb7e3d8c53ab3e8a8f34de4a2383f4c564da7a980d85db56abe0aa33afdc21
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v4
+      - name: Signing hygiene self-test
+        run: bash scripts/test-signing-hygiene.sh
+
+      - name: Signing hygiene check (no keystores, no literal passwords, actions pinned)
+        run: bash scripts/check-signing-hygiene.sh
+
+      - uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
-      # Unit tests run first: a failing test stops the build, so no broken release gets published.
-      - name: Test and build release APK
+      - name: Unit tests
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest assembleRelease
+          ./gradlew --no-daemon testDebugUnitTest
 
-      - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk jarvis.apk
+      - name: Count test results
+        id: counts
+        if: always()
+        run: |
+          s="$(python3 scripts/summarize-tests.py app/build/test-results/testDebugUnitTest || echo 'no results')"
+          echo "summary=$s" >> "$GITHUB_OUTPUT"
+          echo "$s"
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+      # The summary is put in a step name so the numbers are visible in the run's job list.
+      - name: "Result: ${{ steps.counts.outputs.summary }}"
+        if: always()
+        run: echo "${{ steps.counts.outputs.summary }}"
+
+  dev-build:
+    if: github.ref != 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          name: JARVIS-build-${{ github.run_number }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      # Two throwaway keys that exist only on this runner. They prove the environment-based signing path works and let
+      # the emulator job test "other signer" refusals. They are not production keys and are never stored.
+      - name: Create throwaway test keys
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/dev"
+          for k in key1 key2; do
+            pw="$(openssl rand -hex 16)"
+            echo "::add-mask::$pw"
+            echo "${k^^}_PW=$pw" >> "$GITHUB_ENV"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/dev/$k.jks" -storetype PKCS12 -storepass "$pw" -keypass "$pw" \
+              -alias dev -keyalg RSA -keysize 2048 -validity 2 -dname "CN=JARVIS throwaway $k" >/dev/null 2>&1
+          done
+
+      - name: Build A (key1) and B (key1, higher versionCode)
+        run: |
+          set -eu
+          chmod +x gradlew
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.jks" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          ./gradlew --no-daemon assembleRelease
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/A.apk
+          GITHUB_RUN_NUMBER=$((GITHUB_RUN_NUMBER + 1000)) ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk dist/B.apk
+
+      - name: C = B re-signed by a different key
+        run: |
+          set -eu
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          echo "apksigner: $APKSIGNER"
+          "$APKSIGNER" sign --ks "$RUNNER_TEMP/dev/key2.jks" --ks-pass env:KEY2_PW --key-pass env:KEY2_PW --ks-key-alias dev \
+            --out dist/C.apk dist/B.apk
+
+      - name: Verify signatures and that env-based signing used key1
+        run: |
+          set -eu
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          want="$(keytool -list -v -keystore "$RUNNER_TEMP/dev/key1.jks" -storepass "$KEY1_PW" 2>/dev/null | grep -m1 'SHA256:' | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
+          for f in A B C; do
+            "$APKSIGNER" verify --print-certs -v "dist/$f.apk" > "dist/$f.certs.txt"
+            grep -E 'Verified using v[0-9.]+ scheme.*true' "dist/$f.certs.txt"
+          done
+          got="$(grep -m1 'certificate SHA-256 digest' dist/A.certs.txt | sed 's/.*: *//')"
+          [ "$got" = "$want" ] && echo "A is signed by key1 ($got)" || { echo "A signer mismatch"; exit 1; }
+          gotc="$(grep -m1 'certificate SHA-256 digest' dist/C.certs.txt | sed 's/.*: *//')"
+          [ "$gotc" != "$want" ] && echo "C is signed by a different key" || { echo "C unexpectedly matches key1"; exit 1; }
+
+      - name: Name the test APK
+        run: cp dist/A.apk dist/jarvis.apk
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dev-apks-${{ github.run_number }}
+          path: dist/*.apk
+          retention-days: 7
+
+      # Throwaway-key APK for a phone test. Each run uses a NEW key, so uninstall the previous test build first.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: JARVIS-dev-build-${{ github.run_number }}
+          path: dist/jarvis.apk
+          retention-days: 7
+
+  install-matrix:
+    needs: dev-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 31 = Android 12, 32 = Android 12L, 33 = Android 13, 36 = Android 16
+        api: [31, 32, 33, 36]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-apks-${{ github.run_number }}
+          path: dist
+
+      - name: Fetch the released Build 40 (old key) and check its hash
+        run: |
+          set -eu
+          curl -fsSL -o dist/build40.apk "$BUILD40_URL"
+          echo "$BUILD40_SHA256  dist/build40.apk" | sha256sum -c -
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install / update / refusal tests on API ${{ matrix.api }}
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash ./scripts/emulator-install-test.sh dist/build40.apk dist/A.apk dist/B.apk dist/C.apk
+
+  release-build:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.hash.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Require production signing configuration
+        env:
+          KS_B64: ${{ secrets.JARVIS_KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.JARVIS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.JARVIS_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.JARVIS_KEY_PASSWORD }}
+          CERT: ${{ vars.JARVIS_CERT_SHA256 }}
+        run: |
+          missing=""
+          [ -n "$KS_B64" ] || missing="$missing JARVIS_KEYSTORE_BASE64"
+          [ -n "$KS_PW" ] || missing="$missing JARVIS_KEYSTORE_PASSWORD"
+          [ -n "$KEY_ALIAS" ] || missing="$missing JARVIS_KEY_ALIAS"
+          [ -n "$KEY_PW" ] || missing="$missing JARVIS_KEY_PASSWORD"
+          [ -n "$CERT" ] || missing="$missing JARVIS_CERT_SHA256(variable)"
+          if [ -n "$missing" ]; then echo "::error::Production signing is not configured. Missing:$missing. Nothing will be published."; exit 1; fi
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Build and sign the release APK
+        env:
+          KS_B64: ${{ secrets.JARVIS_KEYSTORE_BASE64 }}
+          JARVIS_KEYSTORE_PASSWORD: ${{ secrets.JARVIS_KEYSTORE_PASSWORD }}
+          JARVIS_KEY_ALIAS: ${{ secrets.JARVIS_KEY_ALIAS }}
+          JARVIS_KEY_PASSWORD: ${{ secrets.JARVIS_KEY_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk jarvis.apk
+
+      - name: Remove the keystore from the runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Verify the signer is the expected production certificate
+        env:
+          EXPECTED: ${{ vars.JARVIS_CERT_SHA256 }}
+        run: |
+          set -eu
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --print-certs -v jarvis.apk | tee certs.txt
+          got="$(grep -m1 'certificate SHA-256 digest' certs.txt | sed 's/.*: *//' | tr 'A-F' 'a-f')"
+          want="$(echo "$EXPECTED" | tr -d ': ' | tr 'A-F' 'a-f')"
+          [ "$got" = "$want" ] || { echo "::error::Signer $got is not the expected certificate."; exit 1; }
+          [ "$(grep -c 'Number of signers: 1' certs.txt)" = 1 ] || { echo "::error::Expected exactly one signer."; exit 1; }
+
+      - name: Hash
+        id: hash
+        run: echo "sha256=$(sha256sum jarvis.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-apk
           path: jarvis.apk
           retention-days: 7
 
-      # The in-app updater reads the latest release, so every green build is published.
-      # Only main publishes. A manual run on any other branch builds and tests but releases nothing.
-      - name: Publish release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
+  publish:
+    needs: release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          tag_name: build-${{ github.run_number }}
-          name: JARVIS build ${{ github.run_number }}
-          body: ${{ github.event.head_commit.message }}
-          files: jarvis.apk
-          make_latest: true
+          name: release-apk
+
+      - name: Check the file is the one that was built, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ needs.release-build.outputs.sha256 }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -eu
+          echo "$EXPECTED_SHA  jarvis.apk" | sha256sum -c -
+          printf '%s\n\nSHA-256 of jarvis.apk: %s\n' "$COMMIT_MSG" "$EXPECTED_SHA" > notes.txt
+          gh release create "build-$RUN_NUMBER" jarvis.apk --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "JARVIS build $RUN_NUMBER" --notes-file notes.txt --latest
