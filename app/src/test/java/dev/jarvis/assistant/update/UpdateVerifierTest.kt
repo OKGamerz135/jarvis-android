@@ -1,7 +1,5 @@
 package dev.jarvis.assistant.update
 
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpServer
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -12,6 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.OutputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.SocketException
 import java.net.InetSocketAddress
 import java.security.MessageDigest
 
@@ -117,17 +120,75 @@ class UpdateVerifierTest {
 
     // ------------------------------------------------------------------ downloading, against a real local server
 
-    private var server: HttpServer? = null
-    @After fun stop() { server?.stop(0) }
+    // A tiny socket server (the unit-test classpath does not expose com.sun.net.httpserver).
+    private class HttpExchange(private val socket: Socket) {
+        val responseHeaders = LinkedHashMap<String, String>()
+        val localAddress: InetSocketAddress get() = socket.localSocketAddress as InetSocketAddress
+        private var chunked = false
+        private var sent = false
+        private val raw: OutputStream = socket.getOutputStream()
+
+        val responseBody: OutputStream = object : OutputStream() {
+            override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                if (len == 0) return
+                if (chunked) { raw.write("${Integer.toHexString(len)}\r\n".toByteArray()); raw.write(b, off, len); raw.write("\r\n".toByteArray()) }
+                else raw.write(b, off, len)
+            }
+        }
+
+        /** Same meaning as the JDK server: length > 0 fixed, 0 chunked, -1 no body. */
+        fun sendResponseHeaders(code: Int, length: Long) {
+            sent = true
+            val sb = StringBuilder("HTTP/1.1 $code X\r\nConnection: close\r\n")
+            for ((k, v) in responseHeaders) sb.append("$k: $v\r\n")
+            when {
+                length > 0 -> sb.append("Content-Length: $length\r\n")
+                length == 0L -> { sb.append("Transfer-Encoding: chunked\r\n"); chunked = true }
+                else -> sb.append("Content-Length: 0\r\n")
+            }
+            sb.append("\r\n")
+            raw.write(sb.toString().toByteArray())
+            raw.flush()
+        }
+
+        fun close() {
+            try { if (sent && chunked) raw.write("0\r\n\r\n".toByteArray()); raw.flush() } catch (_: IOException) {}
+            try { socket.close() } catch (_: IOException) {}
+        }
+    }
+
+    private var server: ServerSocket? = null
+    @After fun stop() { server?.close() }
 
     private val local = UrlPolicy(setOf("127.0.0.1"), requireHttps = false)
 
     private fun start(routes: Map<String, (HttpExchange) -> Unit>): String {
-        val s = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        for ((path, h) in routes) s.createContext(path) { ex -> try { h(ex) } finally { ex.close() } }
-        s.start()
+        val s = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        Thread {
+            while (!s.isClosed) {
+                val socket = try { s.accept() } catch (e: SocketException) { break }
+                Thread {
+                    val ex = HttpExchange(socket)
+                    try {
+                        socket.soTimeout = 5000
+                        val input = socket.getInputStream().buffered()
+                        fun line(): String {
+                            val sb = StringBuilder()
+                            while (true) { val c = input.read(); if (c < 0 || c == '\n'.code) break; if (c != '\r'.code) sb.append(c.toChar()) }
+                            return sb.toString()
+                        }
+                        val path = line().split(" ").getOrElse(1) { "/" }.substringBefore("?")
+                        while (line().isNotEmpty()) { /* skip request headers */ }
+                        val h = routes[path]
+                        if (h == null) { ex.sendResponseHeaders(404, -1) } else h(ex)
+                    } catch (_: IOException) {
+                    } finally { ex.close() }
+                }.start()
+            }
+        }.start()
         server = s
-        return "http://127.0.0.1:${s.address.port}"
+        return "http://127.0.0.1:${s.localPort}"
     }
 
     private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
@@ -209,7 +270,7 @@ class UpdateVerifierTest {
 
     @Test fun redirectWithinAllowedHostIsFollowedAndStillVerified() {
         val base = start(mapOf(
-            "/a" to { ex -> ex.responseHeaders.add("Location", "/b"); ex.sendResponseHeaders(302, -1) },
+            "/a" to { ex -> ex.responseHeaders["Location"] = "/b"; ex.sendResponseHeaders(302, -1) },
             "/b" to { ex -> serveBytes(ex, payload) },
         ))
         assertTrue(payload.contentEquals(download("$base/a").toByteArray()))
@@ -217,7 +278,7 @@ class UpdateVerifierTest {
 
     @Test fun redirectToAForeignHostIsRefused() {
         val base = start(mapOf("/a" to { ex ->
-            ex.responseHeaders.add("Location", "http://localhost:${ex.localAddress.port}/b") // "localhost" is not on the list
+            ex.responseHeaders["Location"] = "http://localhost:${ex.localAddress.port}/b" // "localhost" is not on the list
             ex.sendResponseHeaders(302, -1)
         }, "/b" to { ex -> serveBytes(ex, payload) }))
         val e = assertThrows(UpdateException::class.java) { download("$base/a") }
@@ -233,7 +294,7 @@ class UpdateVerifierTest {
     }
 
     @Test fun redirectLoopIsStopped() {
-        val base = start(mapOf("/a" to { ex -> ex.responseHeaders.add("Location", "/a"); ex.sendResponseHeaders(302, -1) }))
+        val base = start(mapOf("/a" to { ex -> ex.responseHeaders["Location"] = "/a"; ex.sendResponseHeaders(302, -1) }))
         val e = assertThrows(UpdateException::class.java) { download("$base/a") }
         assertTrue(e.message!!.contains("too many"))
     }
