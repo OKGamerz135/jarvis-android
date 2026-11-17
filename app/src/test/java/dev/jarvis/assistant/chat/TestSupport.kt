@@ -33,6 +33,14 @@ class FakeSource(
         return Resolved.Ready(ChatTarget(p, 10_000, "model-${p.name}", "KEY", "system"), llm)
     }
 
+    /** Every provider that was saved as the preferred one, in order (the real source writes it to the settings). */
+    val savedPreferred = java.util.concurrent.CopyOnWriteArrayList<AiProvider>()
+
+    override suspend fun setPreferred(provider: AiProvider) {
+        savedPreferred += provider
+        preferred = provider
+    }
+
     override suspend fun snapshot() = ProviderSnapshot(
         preferred,
         failoverEnabled,

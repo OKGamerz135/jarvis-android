@@ -22,6 +22,18 @@ interface SecretStore {
     fun remove(name: String): Boolean
 }
 
+/** What is really true about a saved key, found by trying to read it. */
+enum class KeyState {
+    /** No key is stored. */
+    MISSING,
+
+    /** A key is stored and decrypts. */
+    USABLE,
+
+    /** A key is stored but can't be read right now (for example the Keystore is temporarily unavailable). It was kept. */
+    UNREADABLE_NOW,
+}
+
 /**
  * Saves API keys encrypted. Rules:
  *  - a save is only reported as done when the write really reached storage;
@@ -54,6 +66,16 @@ class SecretVault(private val crypto: SecretCrypto, private val store: SecretSto
         } catch (e: RuntimeException) {
             null // for example IllegalStateException from a Keystore that is not ready: keep the stored key
         }
+    }
+
+    /**
+     * Whether a usable key exists, found by actually reading it (so it can't say "saved" about a key that no longer
+     * decrypts). Like [read], this removes a key that can never be read again, and then reports [KeyState.MISSING].
+     */
+    fun state(name: String): KeyState = when {
+        read(name) != null -> KeyState.USABLE
+        store.contains(name) -> KeyState.UNREADABLE_NOW
+        else -> KeyState.MISSING
     }
 
     fun remove(name: String): Boolean = store.remove(name)

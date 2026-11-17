@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +41,8 @@ import dev.jarvis.assistant.ui.chat.HistoryScreen
 import dev.jarvis.assistant.ui.settings.DiagnosticsScreen
 import dev.jarvis.assistant.ui.settings.MemoryScreen
 import dev.jarvis.assistant.ui.settings.PersonalIntelligenceScreen
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.ui.NavState
+import dev.jarvis.assistant.ui.Screen
 import dev.jarvis.assistant.ui.settings.ProviderScreen
 import dev.jarvis.assistant.ui.settings.ProvidersScreen
 import dev.jarvis.assistant.ui.settings.SettingsHubScreen
@@ -59,45 +61,35 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen(val title: String, val parent: Screen?) {
-    Home("JARVIS", null),
-    History("Chats", Home),
-    Settings("Settings", Home),
-    PersonalIntelligence("Personal Intelligence", Settings),
-    Providers("AI providers", Settings),
-    Provider("Key and model", Providers),
-    Diagnostics("Diagnostics log", Settings),
-    Memory("Memory", Settings),
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun JarvisApp() {
-    var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+    var nav by rememberSaveable(stateSaver = Saver(save = { it.encode() }, restore = { NavState.decode(it) })) {
+        mutableStateOf(NavState())
+    }
     val chatVm: ChatViewModel = viewModel()
-    var editing by rememberSaveable { mutableStateOf<String?>(null) }
-    val parent = screen.parent
-    BackHandler(enabled = parent != null) { if (parent != null) screen = parent }
+    val screen = nav.current
+    BackHandler(enabled = nav.canGoBack) { nav = nav.back() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(screen.title) },
+                title = { Text(if (screen == Screen.Provider) nav.editing?.label ?: screen.title else screen.title) },
                 navigationIcon = {
-                    if (parent != null) {
-                        IconButton(onClick = { screen = parent }) {
+                    if (nav.canGoBack) {
+                        IconButton(onClick = { nav = nav.back() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     }
                 },
                 actions = {
                     if (screen == Screen.Home) {
-                        TextButton(onClick = { screen = Screen.History }) { Text("Chats") }
+                        TextButton(onClick = { nav = nav.open(Screen.History) }) { Text("Chats") }
                         IconButton(onClick = { chatVm.newChat() }) {
                             Icon(Icons.Filled.Add, contentDescription = "New chat")
                         }
-                        IconButton(onClick = { screen = Screen.Settings }) {
+                        IconButton(onClick = { nav = nav.open(Screen.Settings) }) {
                             Icon(Icons.Filled.Settings, contentDescription = "Settings")
                         }
                     }
@@ -107,25 +99,31 @@ private fun JarvisApp() {
     ) { padding ->
         val modifier = Modifier.padding(padding).consumeWindowInsets(padding)
         when (screen) {
-            Screen.Home -> ChatScreen(onOpenProvider = { screen = Screen.Providers }, vm = chatVm, modifier = modifier)
-            Screen.History -> HistoryScreen(vm = chatVm, onOpened = { screen = Screen.Home }, modifier = modifier)
+            Screen.Home -> ChatScreen(onOpenProvider = { nav = nav.open(Screen.Providers) }, vm = chatVm, modifier = modifier)
+            Screen.History -> HistoryScreen(vm = chatVm, onOpened = { nav = nav.home() }, modifier = modifier)
             Screen.Settings -> SettingsHubScreen(
-                onOpenPersonalIntelligence = { screen = Screen.PersonalIntelligence },
-                onOpenProvider = { screen = Screen.Providers },
-                onOpenDiagnostics = { screen = Screen.Diagnostics },
-                onOpenMemory = { screen = Screen.Memory },
+                onOpenPersonalIntelligence = { nav = nav.open(Screen.PersonalIntelligence) },
+                onOpenProvider = { nav = nav.open(Screen.Providers) },
+                onOpenDiagnostics = { nav = nav.open(Screen.Diagnostics) },
+                onOpenMemory = { nav = nav.open(Screen.Memory) },
                 modifier = modifier,
             )
             Screen.PersonalIntelligence -> PersonalIntelligenceScreen(modifier)
             Screen.Providers -> ProvidersScreen(
-                onConfigure = { editing = it.name; screen = Screen.Provider },
+                onConfigure = { nav = nav.openProvider(it) },
                 modifier = modifier,
                 chatVm = chatVm,
             )
-            Screen.Provider -> ProviderScreen(
-                editing = AiProvider.entries.firstOrNull { it.name == editing },
-                modifier = modifier,
-            )
+            Screen.Provider -> {
+                val editing = nav.editing
+                if (editing != null) {
+                    ProviderScreen(
+                        editing = editing,
+                        onConfigureOther = { nav = nav.openProvider(it) },
+                        modifier = modifier,
+                    )
+                }
+            }
             Screen.Diagnostics -> DiagnosticsScreen(modifier)
             Screen.Memory -> MemoryScreen(modifier)
         }

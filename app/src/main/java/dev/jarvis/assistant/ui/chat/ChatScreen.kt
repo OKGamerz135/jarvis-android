@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.jarvis.assistant.ai.ChatRole
 import dev.jarvis.assistant.chat.ChatProblem
 import dev.jarvis.assistant.chat.ChatViewModel
+import dev.jarvis.assistant.ui.common.ActionRow
 import dev.jarvis.assistant.chat.StoredMessage
 import java.time.Instant
 import java.time.ZoneId
@@ -325,7 +326,7 @@ private fun ProblemBanner(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionRow {
                 if (canRetry) Button(onClick = onRetry) { Text("Retry") }
                 if (problem.needsSetup) OutlinedButton(onClick = onOpenProvider) { Text("Open AI providers") }
                 TextButton(onClick = onDismiss) { Text("Dismiss") }

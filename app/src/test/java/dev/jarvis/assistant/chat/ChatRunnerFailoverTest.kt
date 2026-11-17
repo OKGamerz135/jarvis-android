@@ -236,7 +236,7 @@ class ChatRunnerFailoverTest {
         assertEquals(R, r.state.value.temporaryProvider)
         // Sending counts as staying; accepting later still works.
         r.acceptRecovery()
-        assertNull(r.state.value.temporaryProvider)
+        r.until { it.temporaryProvider == null } // the switch back is saved first, then the state is cleared
         r.sendWhenFree("two")
         val s = r.idle()
         assertEquals("gemini again", s.conversation.messages.last().text)

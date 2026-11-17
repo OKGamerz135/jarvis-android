@@ -67,9 +67,9 @@ data class ChatUiState(
     val history: List<ConversationSummary> = emptyList(),
     /** Non-null during the countdown before switching provider. */
     val failover: FailoverOffer? = null,
-    /** The provider in use after an automatic switch. Null means the preferred provider is in use. */
+    /** The provider an automatic switch put in use (it is also the saved preferred provider then). Null = no switch is active. */
     val temporaryProvider: AiProvider? = null,
-    /** The preferred provider that [temporaryProvider] replaced. */
+    /** The provider that was preferred before the automatic switch; the "switch back?" question is about this one. */
     val preferredProvider: AiProvider? = null,
     /** Set when the preferred provider is available again; the screen asks whether to switch back. */
     val recoveryOffer: AiProvider? = null,
@@ -125,6 +125,12 @@ class ChatRunner(
     private var failingProvider: AiProvider? = null
     private var recoveryDeclinedFor: AiProvider? = null
     private var recoveryTimer: Job? = null
+
+    /**
+     * A preference change the user just asked for that is still being saved. A message sent in that moment waits for it
+     * ([loop] joins it first), so it always goes to the provider the user just chose, never to the previous one.
+     */
+    @Volatile private var pendingPreference: Job? = null
     private val simulateNext = AtomicBoolean(false)
     private val visible = MutableStateFlow(true)
 
@@ -249,10 +255,39 @@ class ChatRunner(
         _state.update { it.copy(simulationArmed = true) }
     }
 
-    /** Switch back to the preferred provider after it recovered. */
+    /** Switch back to the provider that was preferred before the automatic switch, and make it the preferred one again. */
     fun acceptRecovery() {
         val back = _state.value.recoveryOffer ?: _state.value.preferredProvider
         if (back != null) ledger.clear(back)
+        pendingPreference = scope.launch {
+            if (back != null && !saveAsPreferred(back)) return@launch
+            endFailoverEpisode()
+        }
+    }
+
+    /**
+     * The user picked [provider] as the one that answers chats. That ends any automatic-switch episode: the saved
+     * preference and what the chat screen says always agree, and the next message goes to [provider].
+     */
+    fun choosePreferred(provider: AiProvider) {
+        pendingPreference = scope.launch {
+            if (!saveAsPreferred(provider)) return@launch
+            endFailoverEpisode()
+        }
+    }
+
+    private suspend fun saveAsPreferred(provider: AiProvider): Boolean =
+        try {
+            source.setPreferred(provider)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false // the preference could not be saved; leave everything as it was rather than show a state that isn't true
+        }
+
+    private fun endFailoverEpisode() {
+        recoveryTimer?.cancel()
         recoveryDeclinedFor = null
         _state.update { it.copy(temporaryProvider = null, preferredProvider = null, recoveryOffer = null) }
     }
@@ -368,7 +403,12 @@ class ChatRunner(
 
     /** Tries providers until one answers or we run out of sensible options. Never re-adds the user's message. */
     private suspend fun loop() {
-        var provider: AiProvider? = _state.value.temporaryProvider
+        pendingPreference?.join()
+        // The saved preference is the single truth about which provider answers. If it no longer matches the provider an
+        // earlier automatic switch put in use (the user chose another one since), that switch episode is over.
+        val temp = _state.value.temporaryProvider
+        if (temp != null && source.snapshot().preferred != temp) endFailoverEpisode()
+        var provider: AiProvider? = null
         val tried = LinkedHashSet<AiProvider>()
         var waitedRate = false
         var waitedNet = false
@@ -449,15 +489,18 @@ class ChatRunner(
                         return
                     }
                     provider = d.to.provider
+                    // The switch is real now, so the saved preference follows it: what the app says and what is used agree.
+                    val original = _state.value.preferredProvider ?: snap.preferred
+                    saveAsPreferred(d.to.provider)
                     _state.update {
                         it.copy(
                             temporaryProvider = d.to.provider,
-                            preferredProvider = it.preferredProvider ?: snap.preferred,
+                            preferredProvider = original,
                             recoveryOffer = null,
                         )
                     }
                     recoveryDeclinedFor = null
-                    scheduleRecoveryCheck(snap.preferred)
+                    scheduleRecoveryCheck(original)
                 }
                 is Decision.WaitRateLimit -> {
                     waitedRate = true

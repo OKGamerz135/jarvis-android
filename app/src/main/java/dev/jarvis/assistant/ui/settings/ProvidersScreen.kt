@@ -31,7 +31,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.jarvis.assistant.ui.common.ActionRow
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.jarvis.assistant.chat.ChatViewModel
 import dev.jarvis.assistant.diag.DiagnosticsLog
@@ -57,6 +60,8 @@ fun ProvidersScreen(
     val records by ledger.records.collectAsStateWithLifecycle()
     val log by DiagnosticsLog.entries.collectAsStateWithLifecycle()
     val chat by chatVm.state.collectAsStateWithLifecycle()
+    // Re-read the keys whenever this screen comes back, so "key saved" is never older than the key itself.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshKeys() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var quotaText by remember { mutableStateOf<String?>(null) }
@@ -109,8 +114,7 @@ fun ProvidersScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             val tags = buildList {
-                                if (p == s.provider) add("preferred")
-                                if (chat.temporaryProvider == p) add("in use temporarily")
+                                if (p == s.provider) add(if (chat.temporaryProvider == p) "preferred, set by automatic failover" else "preferred")
                             }
                             Text(
                                 p.label + if (tags.isEmpty()) "" else " (${tags.joinToString(", ")})",
@@ -120,6 +124,11 @@ fun ProvidersScreen(
                                 ProviderStatus.describe(p, p in s.acknowledged, keys[p] == true, record, now, zone),
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (p == s.provider) {
+                                ProviderStatus.chatWarning(p, p in s.acknowledged, keys[p] == true)?.let { warning ->
+                                    Text(warning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
                             Text(
                                 "Counted on this phone: $used generation request(s) in the last 24 h. " +
                                     "The provider's own count may differ.",
@@ -139,13 +148,13 @@ fun ProvidersScreen(
                             )
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ActionRow {
                         TextButton(enabled = index > 0, onClick = { vm.update { it.copy(providerOrder = move(order, index, -1)) } }) { Text("Up") }
                         TextButton(
                             enabled = index < order.lastIndex,
                             onClick = { vm.update { it.copy(providerOrder = move(order, index, +1)) } },
                         ) { Text("Down") }
-                        TextButton(enabled = p != s.provider, onClick = { vm.update { it.copy(provider = p) } }) { Text("Make preferred") }
+                        TextButton(enabled = p != s.provider, onClick = { chatVm.choosePreferred(p) }) { Text("Make preferred") }
                         OutlinedButton(onClick = { onConfigure(p) }) { Text("Key and model") }
                     }
                     if (p == AiProvider.OPENROUTER && keys[p] == true) {

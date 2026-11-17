@@ -42,6 +42,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material3.LinearProgressIndicator
@@ -52,6 +54,7 @@ import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.Humour
 import dev.jarvis.assistant.settings.Profanity
 import dev.jarvis.assistant.settings.JarvisSettings
+import dev.jarvis.assistant.settings.KeyState
 import dev.jarvis.assistant.settings.Personality
 import dev.jarvis.assistant.settings.ResponseLength
 import dev.jarvis.assistant.settings.SettingsViewModel
@@ -72,6 +75,7 @@ fun SettingsHubScreen(
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val keys by vm.keyPresent.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshKeys() }
     val s = settings
 
     ScreenColumn(modifier) {
@@ -239,48 +243,46 @@ private fun PersonalIntelligenceContent(s: JarvisSettings, vm: SettingsViewModel
 
 @Composable
 fun ProviderScreen(
-    editing: AiProvider? = null,
+    editing: AiProvider,
+    onConfigureOther: (AiProvider) -> Unit,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
     testVm: ConnectionTestViewModel = viewModel(),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val keys by vm.keyPresent.collectAsStateWithLifecycle()
+    val keys by vm.keyState.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
+    // Re-read the keys whenever this screen comes back, so "key saved" is never older than the key itself.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshKeys() }
     val current = settings
     if (current == null) {
         Loading(modifier)
     } else {
-        ProviderContent(current, keys, notice, vm, testVm, editing ?: current.provider, modifier)
+        // `editing` is the provider being SET UP. It has nothing to do with the provider used for chat.
+        ProviderContent(current, keys, notice, vm, testVm, editing, onConfigureOther, modifier)
     }
 }
 
 @Composable
 private fun ProviderContent(
     s: JarvisSettings,
-    keys: Map<AiProvider, Boolean>,
+    keys: Map<AiProvider, KeyState>,
     notice: String?,
     vm: SettingsViewModel,
     testVm: ConnectionTestViewModel,
     provider: AiProvider,
+    onConfigureOther: (AiProvider) -> Unit,
     modifier: Modifier,
 ) {
     val acknowledged = provider in s.acknowledged
-    val hasKey = keys[provider] == true
+    val keyState = keys[provider] ?: KeyState.MISSING
+    val hasKey = keyState == KeyState.USABLE
 
     ScreenColumn(modifier) {
-        SectionTitle("Which AI answers you")
-        AiProvider.entries.forEach { p ->
-            RadioRow(
-                selected = s.provider == p,
-                title = p.label,
-                subtitle = if (keys[p] == true) "Key saved" else "No key yet",
-                onClick = { vm.update { it.copy(provider = p) } },
-            )
-        }
         Text(
-            "JARVIS never uses a paid service. If a provider's quota is genuinely used up, automatic failover " +
-                "(Settings > AI providers) can switch to another ready provider after a 5-second countdown you can cancel.",
+            "You are setting up ${provider.label}. This screen never changes which AI answers your chats " +
+                "(now: ${s.provider.label}). Choose that under Settings > AI providers > Make preferred. Checks and " +
+                "tests below always use ${provider.label}.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -332,10 +334,18 @@ private fun ProviderContent(
 
         SectionTitle("API key")
         Text(provider.keyHelp, style = MaterialTheme.typography.bodySmall)
-        if (hasKey) {
+        if (keyState == KeyState.UNREADABLE_NOW) {
+            Text(
+                "A key is stored but can't be read right now, so it is not being used. Try again in a moment, or paste " +
+                    "a new key to replace it.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (hasKey || keyState == KeyState.UNREADABLE_NOW) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Key saved, encrypted on this phone.",
+                    if (hasKey) "Key saved, encrypted on this phone." else "A key is stored.",
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
                 )
@@ -376,7 +386,8 @@ private fun ProviderContent(
             )
         }
 
-        ProviderTools(provider, hasKey && acknowledged, testVm) { vm.update { it.copy(provider = AiProvider.GROQ) } }
+        // "Try Groq" only opens Groq's own setup. It does not change which provider answers chats.
+        ProviderTools(provider, hasKey && acknowledged, testVm) { onConfigureOther(AiProvider.GROQ) }
 
         Text(
             "About your key: it is stored encrypted with Android's Keystore and is never written into the app " +

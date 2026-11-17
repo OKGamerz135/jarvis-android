@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.jarvis.assistant.ai.AvailabilityState
 import dev.jarvis.assistant.ai.ConnectionTestViewModel
+import dev.jarvis.assistant.ai.ProviderTestState
 import dev.jarvis.assistant.ai.DiagState
 import dev.jarvis.assistant.ai.TestState
 import dev.jarvis.assistant.settings.AiProvider
@@ -33,6 +34,14 @@ internal fun ProviderTools(
     vm: ConnectionTestViewModel,
     onTryGroq: () -> Unit,
 ) {
+    // Results belong to THIS provider only; another provider's results are never shown here.
+    val all by vm.states.collectAsStateWithLifecycle()
+    val shown = all[provider] ?: ProviderTestState()
+    val active by vm.active.collectAsStateWithLifecycle()
+    // One check at a time, for any provider (they share free quota and a cooldown).
+    val other = active?.takeIf { it.provider != provider }
+    val canStart = ready && active == null
+
     if (!ready) {
         Text(
             "Checks need a saved key and the \"I understand\" box ticked.",
@@ -40,9 +49,16 @@ internal fun ProviderTools(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    AvailabilityCard(provider, ready, vm)
-    GenerationCard(provider, ready, vm, onTryGroq)
-    DiagnosticsCard(ready, vm)
+    if (other != null) {
+        Text(
+            "A check for ${other.provider.label} is running. Only one check runs at a time, so wait for it to finish.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    AvailabilityCard(provider, canStart, shown.availability, vm)
+    GenerationCard(provider, canStart, shown.generation, vm, onTryGroq)
+    DiagnosticsCard(provider, canStart, shown.diagnostics, vm)
 }
 
 @Composable
@@ -71,20 +87,20 @@ private fun FailureBlock(message: String, details: String?) {
 }
 
 @Composable
-private fun AvailabilityCard(provider: AiProvider, ready: Boolean, vm: ConnectionTestViewModel) {
-    val state by vm.availability.collectAsStateWithLifecycle()
+private fun AvailabilityCard(provider: AiProvider, canStart: Boolean, state: AvailabilityState, vm: ConnectionTestViewModel) {
     SectionTitle("1. Availability check")
     Hint(
         "Asks ${provider.label} whether your key can see this model. Generates nothing and uses no generation quota. " +
             "It does not prove that generating works.",
     )
-    Button(enabled = ready && state !is AvailabilityState.Running, onClick = { vm.checkAvailability() }) {
+    Button(enabled = canStart, onClick = { vm.checkAvailability(provider) }) {
         Text("Check availability")
     }
     when (val s = state) {
         AvailabilityState.Idle -> {}
         AvailabilityState.Running -> LinearProgressIndicator(Modifier.fillMaxWidth())
         is AvailabilityState.Ok -> Panel {
+            Hint("Result for ${provider.label}")
             Text(
                 "Reachable. Key accepted and model \"${s.model}\" exists" +
                     (s.displayName?.let { " ($it)" } ?: "") + ".",
@@ -100,11 +116,10 @@ private fun AvailabilityCard(provider: AiProvider, ready: Boolean, vm: Connectio
 }
 
 @Composable
-private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionTestViewModel, onTryGroq: () -> Unit) {
-    val state by vm.state.collectAsStateWithLifecycle()
+private fun GenerationCard(provider: AiProvider, canStart: Boolean, state: TestState, vm: ConnectionTestViewModel, onTryGroq: () -> Unit) {
     val usage by vm.generationCalls24h.collectAsStateWithLifecycle()
     val used = usage[provider.label] ?: 0
-    var prompt by remember { mutableStateOf("Introduce yourself in two sentences.") }
+    var prompt by remember(provider) { mutableStateOf("Introduce yourself in two sentences.") }
 
     SectionTitle("2. Generation test")
     Hint(
@@ -120,8 +135,8 @@ private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionT
         modifier = Modifier.fillMaxWidth(),
     )
     Button(
-        enabled = ready && prompt.isNotBlank() && state !is TestState.Running,
-        onClick = { vm.runTest(prompt.trim()) },
+        enabled = canStart && prompt.isNotBlank(),
+        onClick = { vm.runTest(provider, prompt.trim()) },
     ) { Text("Send test message") }
     Hint("${provider.label} generation requests from this phone in the last 24 hours, failed ones included: $used")
 
@@ -144,26 +159,26 @@ private fun GenerationCard(provider: AiProvider, ready: Boolean, vm: ConnectionT
             FailureBlock(t.message, t.details)
             if (t.offerAlternative) {
                 Text(
-                    "Gemini is still overloaded after 2 retries. You can switch to Groq yourself. Nothing is sent " +
-                        "to Groq until you tap Send test message there, and Groq needs its own key and \"I understand\" box.",
+                    "Gemini is still overloaded after 2 retries. You can open Groq's setup yourself. This does not change which " +
+                        "AI answers your chats, and nothing is sent to Groq until you tap Send test message there. Groq needs " +
+                        "its own key and \"I understand\" box.",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Button(onClick = onTryGroq) { Text("Try Groq instead") }
+                Button(onClick = onTryGroq) { Text("Open Groq setup") }
             }
         }
     }
 }
 
 @Composable
-private fun DiagnosticsCard(ready: Boolean, vm: ConnectionTestViewModel) {
-    val state by vm.diagnostics.collectAsStateWithLifecycle()
+private fun DiagnosticsCard(provider: AiProvider, canStart: Boolean, state: DiagState, vm: ConnectionTestViewModel) {
     SectionTitle("3. Run diagnostics")
     Hint(
         "Runs the availability check, then ONE tiny generation (a one-word reply, no retries). Only if that fails " +
             "with a server-side error does it make one more generation call, not streamed, to compare. " +
             "So it uses at most 2 generation requests.",
     )
-    OutlinedButton(enabled = ready && state !is DiagState.Running, onClick = { vm.runDiagnostics() }) {
+    OutlinedButton(enabled = canStart, onClick = { vm.runDiagnostics(provider) }) {
         Text("Run diagnostics")
     }
     when (val d = state) {

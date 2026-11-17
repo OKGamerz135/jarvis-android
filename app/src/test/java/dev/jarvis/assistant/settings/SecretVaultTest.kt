@@ -114,4 +114,25 @@ class SecretVaultTest {
     @Test fun missingKeyReadsAsNull() {
         assertNull(vault.read("nothing"))
     }
+
+    // ------------------------------------------------------------------ C-05: the key status comes from really reading the key
+
+    @Test fun stateIsMissingUsableOrUnreadableAccordingToReality() {
+        assertEquals(KeyState.MISSING, vault.state("p"))
+        vault.save("p", key)
+        assertEquals(KeyState.USABLE, vault.state("p"))
+        crypto.decryptFailure = KeyStoreException("not ready")
+        assertEquals(KeyState.UNREADABLE_NOW, vault.state("p"))
+        assertTrue("a temporary failure must not delete the key", store.map.containsKey("p"))
+        crypto.decryptFailure = null
+        assertEquals(KeyState.USABLE, vault.state("p"))
+    }
+
+    @Test fun aKeyThatCanNeverBeReadAgainIsReportedMissingNotSaved() {
+        vault.save("p", key)
+        crypto.decryptFailure = AEADBadTagException("bad")
+        assertTrue(vault.has("p")) // presence alone would have said "saved"
+        assertEquals(KeyState.MISSING, vault.state("p"))
+        assertFalse(store.map.containsKey("p"))
+    }
 }

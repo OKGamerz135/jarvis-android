@@ -25,6 +25,9 @@ interface ProviderSource {
     suspend fun resolve(provider: AiProvider?): Resolved
 
     suspend fun snapshot(): ProviderSnapshot
+
+    /** Makes [provider] the preferred (chat) provider. Used when failover switches, and when the user picks one. */
+    suspend fun setPreferred(provider: AiProvider) {}
 }
 
 /** Waits until the phone has a network again. */

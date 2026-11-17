@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The slider must change the very next message, in the open conversation and in new ones, with no restart.
- * [LiveSettingsSource] does what AndroidProviderSource.resolve does: read the CURRENT settings and build the prompt per request.
+ * [LiveSettingsSource] does what SettingsProviderSource.resolve does: read the CURRENT settings and build the prompt per request.
  */
 class ProfanityNextMessageTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

@@ -34,4 +34,18 @@ object ProviderStatus {
         }
         return "Ready. No quota problem has been reported."
     }
+
+    /**
+     * A warning for the provider that is selected for chat when it can't be used yet, or null when it is fine.
+     * Selecting such a provider is allowed; chatting with it is refused (nothing is sent, nothing falls back silently).
+     */
+    fun chatWarning(provider: AiProvider, acknowledged: Boolean, hasKey: Boolean): String? = when {
+        !hasKey ->
+            "${provider.label} is not configured: it has no usable API key. While it is selected, chat messages are NOT sent " +
+                "anywhere, and JARVIS will not switch to another provider by itself. Add its key, or choose another provider."
+        !acknowledged ->
+            "${provider.label} needs your consent first (tick \"I understand\" in its setup). Until then chat messages are " +
+                "NOT sent anywhere, and JARVIS will not switch to another provider by itself."
+        else -> null
+    }
 }
