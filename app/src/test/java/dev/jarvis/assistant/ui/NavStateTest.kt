@@ -76,4 +76,45 @@ class NavStateTest {
         assertNull(n.editing)
         assertTrue(n.stack == listOf(Screen.Home, Screen.Settings))
     }
+
+    // ------------------------------------------------------------------ the two tabs on the AI providers screen
+
+    @Test fun startsOnTheConfigureTab() = assertEquals(ProvidersTab.Configure, NavState().providersTab)
+
+    @Test fun selectingATabChangesOnlyTheTab() {
+        val n = NavState().open(Screen.Providers)
+        val c = n.selectTab(ProvidersTab.Choose)
+        assertEquals(ProvidersTab.Choose, c.providersTab)
+        assertEquals(n.stack, c.stack); assertEquals(n.editing, c.editing)
+    }
+
+    @Test fun theTabSurvivesLeavingAndComingBack() {
+        val n = NavState().open(Screen.Settings).open(Screen.Providers).selectTab(ProvidersTab.Choose)
+        assertEquals(ProvidersTab.Choose, n.back().providersTab) // still remembered after Back to Settings
+        assertEquals(ProvidersTab.Choose, n.back().open(Screen.Providers).providersTab)
+    }
+
+    @Test fun openingProviderSetupSwitchesToConfigureSoBackReturnsThere() {
+        val n = NavState().open(Screen.Providers).selectTab(ProvidersTab.Choose).openProvider(AiProvider.GROQ)
+        assertEquals(ProvidersTab.Configure, n.providersTab)
+        assertEquals(ProvidersTab.Configure, n.back().providersTab)
+        assertEquals(Screen.Providers, n.back().current)
+    }
+
+    @Test fun tabRoundTripsAndOldSavedTextStillRestores() {
+        val n = NavState().open(Screen.Providers).selectTab(ProvidersTab.Choose)
+        assertEquals(n, NavState.decode(n.encode()))
+        val old = NavState.decode("Home,Providers|") // the format from before tabs existed
+        assertEquals(listOf(Screen.Home, Screen.Providers), old.stack)
+        assertEquals(ProvidersTab.Configure, old.providersTab)
+    }
+
+    @Test fun anUnknownSavedTabFallsBackToTheChat() {
+        assertEquals(NavState(), NavState.decode("Home,Providers||Nope"))
+    }
+
+    @Test fun selectingATabNeverTouchesTheProviderBeingEdited() {
+        val n = NavState().open(Screen.Providers).openProvider(AiProvider.GROQ).selectTab(ProvidersTab.Choose)
+        assertEquals(AiProvider.GROQ, n.editing)
+    }
 }
