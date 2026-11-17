@@ -101,6 +101,8 @@ fun ProvidersScreen(
             }
         }
 
+        chat.preferenceError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+
         SectionTitle("Providers, in failover order")
         val since = System.currentTimeMillis() - UsageGuard.DAY_MS
         order.forEachIndexed { index, p ->

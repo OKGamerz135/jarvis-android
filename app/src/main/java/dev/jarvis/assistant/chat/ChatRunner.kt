@@ -73,6 +73,8 @@ data class ChatUiState(
     val preferredProvider: AiProvider? = null,
     /** Set when the preferred provider is available again; the screen asks whether to switch back. */
     val recoveryOffer: AiProvider? = null,
+    /** Set when the user's choice of preferred provider (or "switch back") could not be saved. Nothing was changed. */
+    val preferenceError: String? = null,
     /** True after "simulate quota exhaustion" was armed for the next message. */
     val simulationArmed: Boolean = false,
     /** Which adapter really handled the latest attempt. Null until an adapter has been invoked. */
@@ -258,9 +260,11 @@ class ChatRunner(
     /** Switch back to the provider that was preferred before the automatic switch, and make it the preferred one again. */
     fun acceptRecovery() {
         val back = _state.value.recoveryOffer ?: _state.value.preferredProvider
-        if (back != null) ledger.clear(back)
         pendingPreference = scope.launch {
-            if (back != null && !saveAsPreferred(back)) return@launch
+            if (back != null) {
+                if (!saveAsPreferred(back)) { reportPreferenceNotSaved(back); return@launch }
+                ledger.clear(back) // only once the switch back really happened
+            }
             endFailoverEpisode()
         }
     }
@@ -271,7 +275,7 @@ class ChatRunner(
      */
     fun choosePreferred(provider: AiProvider) {
         pendingPreference = scope.launch {
-            if (!saveAsPreferred(provider)) return@launch
+            if (!saveAsPreferred(provider)) { reportPreferenceNotSaved(provider); return@launch }
             endFailoverEpisode()
         }
     }
@@ -286,10 +290,20 @@ class ChatRunner(
             false // the preference could not be saved; leave everything as it was rather than show a state that isn't true
         }
 
+    /** The save failed, so nothing changed: the saved preference and the state still agree. Say so instead of staying quiet. */
+    private fun reportPreferenceNotSaved(wanted: AiProvider) {
+        _state.update {
+            it.copy(
+                preferenceError = "Couldn't save ${wanted.label} as your preferred provider, so nothing was changed. " +
+                    "Chats still use the provider that was saved before. Try again.",
+            )
+        }
+    }
+
     private fun endFailoverEpisode() {
         recoveryTimer?.cancel()
         recoveryDeclinedFor = null
-        _state.update { it.copy(temporaryProvider = null, preferredProvider = null, recoveryOffer = null) }
+        _state.update { it.copy(temporaryProvider = null, preferredProvider = null, recoveryOffer = null, preferenceError = null) }
     }
 
     /** Stay on the temporary provider and stop asking about this recovery. */
@@ -488,10 +502,14 @@ class ChatRunner(
                         _state.update { it.copy(problem = cancelledProblem(current)) }
                         return
                     }
-                    provider = d.to.provider
-                    // The switch is real now, so the saved preference follows it: what the app says and what is used agree.
+                    // The switch only happens if it can be saved: what the app says and what is used must agree. If it
+                    // can't be saved, nothing is sent through the other provider and the user is told.
                     val original = _state.value.preferredProvider ?: snap.preferred
-                    saveAsPreferred(d.to.provider)
+                    if (!saveAsPreferred(d.to.provider)) {
+                        _state.update { it.copy(problem = switchNotSavedProblem(current, d.to.provider)) }
+                        return
+                    }
+                    provider = d.to.provider
                     _state.update {
                         it.copy(
                             temporaryProvider = d.to.provider,
@@ -560,6 +578,14 @@ class ChatRunner(
             ResetSource.UNKNOWN -> "reset time unknown"
         }
     }
+
+    private fun switchNotSavedProblem(from: AiProvider, to: AiProvider) = ChatProblem(
+        "${from.label} has used its quota and I was about to switch to ${to.label}, but I couldn't save that change, so " +
+            "I did not switch and nothing was sent to ${to.label}. Your message is saved. Retry to try again, or choose " +
+            "another provider yourself under AI providers.",
+        null,
+        needsSetup = false,
+    )
 
     private fun cancelledProblem(from: AiProvider) = ChatProblem(
         "Switch cancelled. I stayed with ${from.label}, which has used its quota, so I can't answer until you pick " +
