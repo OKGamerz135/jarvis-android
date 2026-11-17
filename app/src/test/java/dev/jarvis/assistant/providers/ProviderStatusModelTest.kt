@@ -119,4 +119,27 @@ class ProviderStatusModelTest {
             assertEquals(1, all.count { it.preferred })
         }
     }
+
+    // ------------------------------------------------------------------ labels for the Choose Chat Provider tab
+
+    @Test fun badgesShowPreferredAndActiveSeparately() {
+        assertEquals(listOf("Preferred", "Active"), status(p = G, preferred = G).chatRoleBadges())
+        assertEquals(emptyList<String>(), status(p = Q, preferred = G).chatRoleBadges())
+    }
+
+    @Test fun badgesDuringAnAutomaticSwitch() {
+        assertEquals(listOf("Preferred (paused by automatic failover)"), status(p = G, preferred = Q, from = G).chatRoleBadges())
+        assertEquals(listOf("Active via automatic failover"), status(p = Q, preferred = Q, from = G).chatRoleBadges())
+        assertEquals(emptyList<String>(), status(p = C, preferred = Q, from = G).chatRoleBadges())
+    }
+
+    @Test fun aBlockedProviderIsNotLabelledActive() {
+        val b = status(p = G, key = KeyState.MISSING, preferred = G).chatRoleBadges()
+        assertEquals(listOf("Preferred", "Selected for chat, but can't answer yet"), b)
+    }
+
+    @Test fun badgesNeverMentionTesting() {
+        for (t in listOf(none, none.copy(generation = genDone)))
+            assertTrue(status(p = G, preferred = G, tests = t).chatRoleBadges().none { it.contains("test", ignoreCase = true) })
+    }
 }

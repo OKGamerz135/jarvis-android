@@ -110,6 +110,8 @@ private fun JarvisApp() {
             )
             Screen.PersonalIntelligence -> PersonalIntelligenceScreen(modifier)
             Screen.Providers -> ProvidersScreen(
+                tab = nav.providersTab,
+                onTabChange = { nav = nav.selectTab(it) },
                 onConfigure = { nav = nav.openProvider(it) },
                 modifier = modifier,
                 chatVm = chatVm,

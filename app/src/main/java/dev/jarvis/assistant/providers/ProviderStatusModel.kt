@@ -45,10 +45,19 @@ data class ProviderStatusModel(
     val preferred: Boolean,
     val active: Boolean,
     val viaFailover: Boolean,
+    /** The user's own choice, set aside while an automatic switch is in use. */
+    val preferredPaused: Boolean,
     /** Selected for chat but not configured: chat messages are refused (nothing is sent, nothing falls back). */
     val chatBlocked: Boolean,
 ) {
     val configured: Boolean get() = config == ConfigStatus.CONFIGURED
+
+    /** Short labels for the chat-provider roles, for the Choose Chat Provider tab. Says nothing about testing. */
+    fun chatRoleBadges(): List<String> = buildList {
+        if (preferred) add(if (preferredPaused) "Preferred (paused by automatic failover)" else "Preferred")
+        if (viaFailover) add("Active via automatic failover") else if (active) add("Active")
+        if (chatBlocked) add("Selected for chat, but can't answer yet")
+    }
 
     companion object {
         /**
@@ -79,6 +88,7 @@ data class ProviderStatusModel(
                 preferred = provider == (if (episode) failoverFrom else savedPreferred),
                 active = selectedForChat && configured,
                 viaFailover = episode && selectedForChat && configured,
+                preferredPaused = episode && provider == failoverFrom,
                 chatBlocked = selectedForChat && !configured,
             )
         }

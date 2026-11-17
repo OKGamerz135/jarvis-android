@@ -20,19 +20,30 @@ object ProviderStatus {
     ): String {
         if (!hasKey) return "Needs an API key"
         if (!acknowledged) return "Needs your consent (tick \"I understand\")"
-        if (record != null) {
-            val until = record.exhaustedUntil?.let { Instant.ofEpochMilli(it) }
-            val active = until == null || until.isAfter(now)
-            if (!active) return "Quota should be available again (the reset time has passed)"
-            val reset = ResetFormat.describe(until, now, zone, locale)
-            return "Quota used up. " + when (record.source) {
-                ResetSource.REPORTED -> "Resets $reset (reported by ${provider.label})."
-                ResetSource.DOCUMENTED -> "Resets $reset (from ${provider.label}'s documentation; the error itself didn't say)."
-                ResetSource.SIMULATED -> "Simulated test, ends $reset."
-                ResetSource.UNKNOWN -> "Reset time unknown."
-            }
+        quotaLine(provider, record, now, zone, locale)?.let { return it }
+        // Says what is known (key and consent present). It is NOT a claim that a connection test passed.
+        return "Configured. No quota problem has been reported."
+    }
+
+    /** What the quota ledger says about [provider], or null when nothing has been recorded. Never invents a reset time. */
+    fun quotaLine(
+        provider: AiProvider,
+        record: QuotaRecord?,
+        now: Instant,
+        zone: ZoneId,
+        locale: Locale = Locale.getDefault(),
+    ): String? {
+        if (record == null) return null
+        val until = record.exhaustedUntil?.let { Instant.ofEpochMilli(it) }
+        val active = until == null || until.isAfter(now)
+        if (!active) return "Quota should be available again (the reset time has passed)"
+        val reset = ResetFormat.describe(until, now, zone, locale)
+        return "Quota used up. " + when (record.source) {
+            ResetSource.REPORTED -> "Resets $reset (reported by ${provider.label})."
+            ResetSource.DOCUMENTED -> "Resets $reset (from ${provider.label}'s documentation; the error itself didn't say)."
+            ResetSource.SIMULATED -> "Simulated test, ends $reset."
+            ResetSource.UNKNOWN -> "Reset time unknown."
         }
-        return "Ready. No quota problem has been reported."
     }
 
     /**

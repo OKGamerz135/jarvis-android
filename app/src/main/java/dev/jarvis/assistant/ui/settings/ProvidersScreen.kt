@@ -11,6 +11,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -19,14 +21,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import dev.jarvis.assistant.ai.ErrorMessages
-import dev.jarvis.assistant.ai.LlmException
-import dev.jarvis.assistant.ai.OpenRouterParsing
-import dev.jarvis.assistant.ai.Providers
-import dev.jarvis.assistant.settings.SecureKeyStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -34,48 +28,120 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.jarvis.assistant.ui.common.ActionRow
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.jarvis.assistant.ai.ConnectionTestViewModel
+import dev.jarvis.assistant.ai.ErrorMessages
+import dev.jarvis.assistant.ai.LlmException
+import dev.jarvis.assistant.ai.OpenRouterParsing
+import dev.jarvis.assistant.ai.ProviderTestState
+import dev.jarvis.assistant.ai.Providers
 import dev.jarvis.assistant.chat.ChatViewModel
 import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.diag.UsageGuard
+import dev.jarvis.assistant.providers.ConfigStatus
 import dev.jarvis.assistant.providers.ProviderStatus
+import dev.jarvis.assistant.providers.ProviderStatusModel
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.settings.JarvisSettings
+import dev.jarvis.assistant.settings.KeyState
+import dev.jarvis.assistant.settings.SecureKeyStore
 import dev.jarvis.assistant.settings.SettingsViewModel
+import dev.jarvis.assistant.ui.ProvidersTab
+import dev.jarvis.assistant.ui.common.ActionRow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 
-/** Overview of all providers: failover switch, order, on/off, and honest quota status. Details open per provider. */
+/**
+ * The AI providers screen with two tabs. Which tab is shown is only a display choice ([tab], kept in NavState); every
+ * setting, key, test result and the chat state live in the view models, so switching tabs never changes or loses any of it.
+ *  - Configure & Test AI: set up a provider (key, model, checks). Never changes which provider answers chats.
+ *  - Choose Chat Provider: which provider answers chats, failover order and on/off, and the failover simulation.
+ */
 @Composable
 fun ProvidersScreen(
+    tab: ProvidersTab,
+    onTabChange: (ProvidersTab) -> Unit,
     onConfigure: (AiProvider) -> Unit,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
     chatVm: ChatViewModel = viewModel(),
+    testVm: ConnectionTestViewModel = viewModel(),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val keys by vm.keyPresent.collectAsStateWithLifecycle()
-    val ledger = QuotaLedgers.get(LocalContext.current)
-    val records by ledger.records.collectAsStateWithLifecycle()
-    val log by DiagnosticsLog.entries.collectAsStateWithLifecycle()
+    val keyStates by vm.keyState.collectAsStateWithLifecycle()
+    val testStates by testVm.states.collectAsStateWithLifecycle()
     val chat by chatVm.state.collectAsStateWithLifecycle()
     // Re-read the keys whenever this screen comes back, so "key saved" is never older than the key itself.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshKeys() }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var quotaText by remember { mutableStateOf<String?>(null) }
-    var quotaBusy by remember { mutableStateOf(false) }
     val s = settings
     if (s == null) {
         Loading(modifier)
         return
     }
+    // One status model for every card: configured, tested, preferred and active are separate facts (B1).
+    val statuses = AiProvider.entries.associateWith { p ->
+        ProviderStatusModel.of(
+            provider = p,
+            keyState = keyStates[p] ?: KeyState.MISSING,
+            acknowledged = p in s.acknowledged,
+            tests = testStates[p] ?: ProviderTestState(),
+            savedPreferred = s.provider,
+            failoverFrom = chat.preferredProvider,
+        )
+    }
+
+    Column(modifier) {
+        TabRow(selectedTabIndex = ProvidersTab.entries.indexOf(tab)) {
+            ProvidersTab.entries.forEach { t ->
+                Tab(selected = t == tab, onClick = { onTabChange(t) }, text = { Text(t.title) })
+            }
+        }
+        when (tab) {
+            ProvidersTab.Choose -> ChooseChatProviderTab(s, statuses, chat.preferenceError, chat.simulationArmed, vm, chatVm)
+            ProvidersTab.Configure -> ConfigureProvidersTab(statuses, onConfigure)
+        }
+    }
+}
+
+// --------------------------------------------------------------------------- Choose Chat Provider
+
+@Composable
+private fun ChooseChatProviderTab(
+    s: JarvisSettings,
+    statuses: Map<AiProvider, ProviderStatusModel>,
+    preferenceError: String?,
+    simulationArmed: Boolean,
+    vm: SettingsViewModel,
+    chatVm: ChatViewModel,
+) {
+    val ledger = QuotaLedgers.get(LocalContext.current)
+    val records by ledger.records.collectAsStateWithLifecycle()
+    val log by DiagnosticsLog.entries.collectAsStateWithLifecycle()
     val now = Instant.now()
     val zone = ZoneId.systemDefault()
     val order = s.orderedProviders()
 
-    ScreenColumn(modifier) {
+    ScreenColumn(Modifier) {
+        val answering = statuses.values.firstOrNull { it.active || it.chatBlocked }
+        Text(
+            when {
+                answering == null -> ""
+                answering.chatBlocked -> "Chat is set to ${answering.provider.label}, but it can't answer yet. Messages are NOT sent anywhere until it is set up or you choose another provider."
+                answering.viaFailover -> "Chat is currently answered by ${answering.provider.label} (automatic failover)."
+                else -> "Chat is answered by ${answering.provider.label}."
+            },
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            "Choosing a provider here never changes its key or model. Set those up on the Configure & Test AI tab.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         Card(
             Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -101,11 +167,12 @@ fun ProvidersScreen(
             }
         }
 
-        chat.preferenceError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+        preferenceError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
 
         SectionTitle("Providers, in failover order")
         val since = System.currentTimeMillis() - UsageGuard.DAY_MS
         order.forEachIndexed { index, p ->
+            val st = statuses.getValue(p)
             val used = UsageGuard.generationCalls(log, p.label, since)
             val record = records[p]
             Card(
@@ -115,19 +182,20 @@ fun ProvidersScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            val tags = buildList {
-                                if (p == s.provider) add(if (chat.temporaryProvider == p) "preferred, set by automatic failover" else "preferred")
+                            Text(p.label, style = MaterialTheme.typography.titleMedium)
+                            st.chatRoleBadges().forEach { badge ->
+                                Text(badge, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                             }
+                            // Configured and tested are different facts; a configured provider is never shown as tested.
                             Text(
-                                p.label + if (tags.isEmpty()) "" else " (${tags.joinToString(", ")})",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                ProviderStatus.describe(p, p in s.acknowledged, keys[p] == true, record, now, zone),
+                                "${st.config.label}. ${st.test.label}.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
-                            if (p == s.provider) {
-                                ProviderStatus.chatWarning(p, p in s.acknowledged, keys[p] == true)?.let { warning ->
+                            ProviderStatus.quotaLine(p, record, now, zone)?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (st.chatBlocked) {
+                                ProviderStatus.chatWarning(p, p in s.acknowledged, st.config == ConfigStatus.NEEDS_CONSENT || st.configured)?.let { warning ->
                                     Text(warning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                 }
                             }
@@ -157,26 +225,6 @@ fun ProvidersScreen(
                             onClick = { vm.update { it.copy(providerOrder = move(order, index, +1)) } },
                         ) { Text("Down") }
                         TextButton(enabled = p != s.provider, onClick = { chatVm.choosePreferred(p) }) { Text("Make preferred") }
-                        OutlinedButton(onClick = { onConfigure(p) }) { Text("Key and model") }
-                    }
-                    if (p == AiProvider.OPENROUTER && keys[p] == true) {
-                        OutlinedButton(
-                            enabled = !quotaBusy,
-                            onClick = {
-                                quotaBusy = true
-                                quotaText = "Asking OpenRouter..."
-                                scope.launch {
-                                    quotaText = try {
-                                        val key = withContext(Dispatchers.IO) { SecureKeyStore(context).read(p.keyName) }.orEmpty()
-                                        OpenRouterParsing.describe(Providers.openRouter().freeQuota(key))
-                                    } catch (e: LlmException) {
-                                        ErrorMessages.of(e.error)
-                                    }
-                                    quotaBusy = false
-                                }
-                            },
-                        ) { Text("Check free quota") }
-                        quotaText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     }
                     if (record != null) {
                         OutlinedButton(onClick = { ledger.clear(p); chatVm.checkRecovery() }) { Text("Mark as available") }
@@ -197,8 +245,68 @@ fun ProvidersScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Button(enabled = !chat.simulationArmed, onClick = { chatVm.armSimulation() }) {
-            Text(if (chat.simulationArmed) "Armed: send a chat message now" else "Simulate quota exhaustion on my next message")
+        Button(enabled = !simulationArmed, onClick = { chatVm.armSimulation() }) {
+            Text(if (simulationArmed) "Armed: send a chat message now" else "Simulate quota exhaustion on my next message")
+        }
+    }
+}
+
+// --------------------------------------------------------------------------- Configure & Test AI
+
+/**
+ * The entry point for setting a provider up. The key, model and checks themselves are on each provider's own screen
+ * ("Key and model"). Nothing here changes which provider answers chats.
+ */
+@Composable
+private fun ConfigureProvidersTab(
+    statuses: Map<AiProvider, ProviderStatusModel>,
+    onConfigure: (AiProvider) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var quotaText by remember { mutableStateOf<String?>(null) }
+    var quotaBusy by remember { mutableStateOf(false) }
+
+    ScreenColumn(Modifier) {
+        Text(
+            "Set up a provider's API key and model and run connection checks. This never changes which provider answers " +
+                "your chats; use the Choose Chat Provider tab for that.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        AiProvider.entries.forEach { p ->
+            val st = statuses.getValue(p)
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(p.label, style = MaterialTheme.typography.titleMedium)
+                    Text("${st.config.label}. ${st.test.label}.", style = MaterialTheme.typography.bodySmall)
+                    ActionRow {
+                        OutlinedButton(onClick = { onConfigure(p) }) { Text("Key and model") }
+                        if (p == AiProvider.OPENROUTER && st.configured) {
+                            OutlinedButton(
+                                enabled = !quotaBusy,
+                                onClick = {
+                                    quotaBusy = true
+                                    quotaText = "Asking OpenRouter..."
+                                    scope.launch {
+                                        quotaText = try {
+                                            val key = withContext(Dispatchers.IO) { SecureKeyStore(context).read(p.keyName) }.orEmpty()
+                                            OpenRouterParsing.describe(Providers.openRouter().freeQuota(key))
+                                        } catch (e: LlmException) {
+                                            ErrorMessages.of(e.error)
+                                        }
+                                        quotaBusy = false
+                                    }
+                                },
+                            ) { Text("Check free quota") }
+                        }
+                    }
+                    if (p == AiProvider.OPENROUTER) quotaText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+            }
         }
     }
 }

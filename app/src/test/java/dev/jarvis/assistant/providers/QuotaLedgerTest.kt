@@ -68,6 +68,8 @@ class QuotaLedgerTest {
         assertTrue(text(ResetSource.UNKNOWN, null).contains("unknown"))
         assertEquals("Needs an API key", ProviderStatus.describe(G, true, false, null, at, zone))
         assertTrue(ProviderStatus.describe(G, false, true, null, at, zone).contains("consent"))
-        assertTrue(ProviderStatus.describe(G, true, true, null, at, zone).startsWith("Ready"))
+        val configured = ProviderStatus.describe(G, true, true, null, at, zone)
+        assertTrue(configured, configured.startsWith("Configured") && !configured.contains("Ready"))
+        assertNull(ProviderStatus.quotaLine(G, null, at, zone))
     }
 }
