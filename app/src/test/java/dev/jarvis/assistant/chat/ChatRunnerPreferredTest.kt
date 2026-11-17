@@ -21,6 +21,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -330,12 +332,31 @@ class ChatRunnerPreferredTest {
         assertEquals("still on the temporary provider", R, s.temporaryProvider)
         assertEquals(G, s.preferredProvider)
         assertEquals(R, fake.preferred)
+        assertNotNull("the exhausted record must survive a failed switch-back", ledger.record(G))
         run.ask("two")
+        assertNotNull("and still be there after another message", ledger.record(G))
         assertEquals("the message goes to the saved preference (Groq)", 2, r.calls.get())
         // Retrying when saving works completes the switch back.
         src.failing = false
         run.acceptRecovery()
         run.until { it.temporaryProvider == null && it.preferenceError == null }
         assertEquals(G, fake.preferred)
+        assertNull("cleared only after the switch back really happened", ledger.record(G))
+    }
+
+    @Test fun aSuccessfulFailoverClearsAStaleSaveError() = runBlocking {
+        val g = failing(quota()); val r = ok("from groq"); val c = ok("from cloudflare")
+        val fake = FakeSource(mapOf(G to g, R to r, C to c), preferred = C).also { it.ledger = ledger }
+        val src = FailingSave(fake)
+        val run = runner(src)
+        run.idle()
+        run.choosePreferred(G)                           // fails: an error is now showing
+        run.until { it.preferenceError != null }
+        src.failing = false
+        fake.preferred = G                               // the user picks Gemini some other way, so a failover can start from it
+        run.ask("hello")                                 // Gemini is exhausted -> switches (and saves) successfully
+        val s = run.until { it.temporaryProvider != null && !it.generating }
+        assertNull("the old error must not stay on screen after a successful switch", s.preferenceError)
+        assertEquals(s.temporaryProvider, fake.preferred)
     }
 }

@@ -515,6 +515,7 @@ class ChatRunner(
                             temporaryProvider = d.to.provider,
                             preferredProvider = original,
                             recoveryOffer = null,
+                            preferenceError = null, // a stale "couldn't save" message must not survive a successful save
                         )
                     }
                     recoveryDeclinedFor = null
