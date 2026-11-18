@@ -45,21 +45,21 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.update(transform) }
     }
 
-    private val _notice = MutableStateFlow<String?>(null)
+    private val _notice = MutableStateFlow<KeyNotice?>(null)
 
     /** A short message about the last key action, or null. Failures show here instead of crashing. */
-    val notice: StateFlow<String?> = _notice.asStateFlow()
+    val notice: StateFlow<KeyNotice?> = _notice.asStateFlow()
 
     fun saveKey(provider: AiProvider, key: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val stored = keys.save(provider.keyName, key.filterNot { it.isWhitespace() })
-                _notice.value = if (stored) "Key saved." else "Couldn't save the key: the phone didn't write it to storage. Nothing was changed."
+                _notice.value = KeyNotice.saved(provider, stored)
                 if (stored) KeyChanges.changed(provider)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _notice.value = "Couldn't save the key: ${e.javaClass.simpleName}: ${e.message}"
+                _notice.value = KeyNotice.saveFailed(provider, e)
             }
             readKeyStates()
         }
@@ -69,12 +69,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val removed = keys.remove(provider.keyName)
-                _notice.value = if (removed) "Key removed." else "Couldn't remove the key: the phone didn't write the change. Try again."
+                _notice.value = KeyNotice.removed(provider, removed)
                 if (removed) KeyChanges.changed(provider)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _notice.value = "Couldn't remove the key: ${e.javaClass.simpleName}: ${e.message}"
+                _notice.value = KeyNotice.removeFailed(provider, e)
             }
             readKeyStates()
         }

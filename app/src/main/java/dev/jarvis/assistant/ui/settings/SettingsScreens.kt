@@ -54,6 +54,9 @@ import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.Humour
 import dev.jarvis.assistant.settings.Profanity
 import dev.jarvis.assistant.settings.JarvisSettings
+import dev.jarvis.assistant.settings.KeyInputCheck
+import dev.jarvis.assistant.settings.KeyNotice
+import dev.jarvis.assistant.settings.ModelInputNote
 import dev.jarvis.assistant.settings.KeyState
 import dev.jarvis.assistant.settings.Personality
 import dev.jarvis.assistant.settings.ResponseLength
@@ -267,7 +270,7 @@ fun ProviderScreen(
 private fun ProviderContent(
     s: JarvisSettings,
     keys: Map<AiProvider, KeyState>,
-    notice: String?,
+    notice: KeyNotice?,
     vm: SettingsViewModel,
     testVm: ConnectionTestViewModel,
     provider: AiProvider,
@@ -327,7 +330,10 @@ private fun ProviderContent(
                 vm.update { it.withModel(provider, v) }
             },
             label = { Text("Model name") },
-            supportingText = { Text("Default: ${provider.defaultModel}. Model names change; edit this if one stops working.") },
+            supportingText = {
+                // Says exactly which model is used, and whether that is the default because the field is blank.
+                Text(ModelInputNote.of(model, provider).message + " Model names change; edit this if one stops working.")
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -362,11 +368,18 @@ private fun ProviderContent(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
-        val cleaned = keyInput.filterNot { it.isWhitespace() }
+        val keyCheck = KeyInputCheck.check(keyInput, provider)
+        KeyInputCheck.message(keyCheck, provider)?.let { msg ->
+            Text(
+                msg,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (keyCheck is KeyInputCheck.Valid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            )
+        }
         Button(
-            enabled = acknowledged && cleaned.length >= MIN_KEY_LENGTH,
+            enabled = acknowledged && keyCheck is KeyInputCheck.Valid,
             onClick = {
-                vm.saveKey(provider, cleaned)
+                (keyCheck as? KeyInputCheck.Valid)?.let { vm.saveKey(provider, it.key) }
                 keyInput = ""
             },
         ) { Text("Save key") }
@@ -377,11 +390,12 @@ private fun ProviderContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (notice != null) {
+        // The result of the last save/remove, only on the screen of the provider it was for.
+        if (notice != null && notice.provider == provider) {
             Text(
-                notice,
+                notice.message,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (notice.startsWith("Couldn't")) MaterialTheme.colorScheme.error
+                color = if (notice.isError) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.primary,
             )
         }
@@ -401,7 +415,6 @@ private fun ProviderContent(
     }
 }
 
-private const val MIN_KEY_LENGTH = 20
 
 // ------------------------------------------------------------- helpers
 
