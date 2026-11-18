@@ -249,6 +249,8 @@ class CloudflareProvider(
 
     private fun open(path: String, method: String, token: String, readTimeoutMs: Int): HttpURLConnection {
         val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
+        // Never follow a redirect: it would send this request, and its key, somewhere nobody chose. See RedirectRefusal.
+        conn.instanceFollowRedirects = false
         conn.requestMethod = method
         conn.connectTimeout = 15_000
         conn.readTimeout = readTimeoutMs
@@ -259,6 +261,10 @@ class CloudflareProvider(
     }
 
     private fun httpFailure(call: Call, conn: HttpURLConnection, status: Int, model: String): LlmException {
+        if (RedirectRefusal.isRedirect(status)) {
+            val refusal = RedirectRefusal.error(status, conn.getHeaderField("Location"), call.secretsList)
+            return call.failed(status, null, refusal.message, refusal)
+        }
         val body = readErrorBody(conn)
         val parsed = CloudflareParsing.parseFailure(status, body, model, clock(), call.secretsList)
         var error = parsed.error

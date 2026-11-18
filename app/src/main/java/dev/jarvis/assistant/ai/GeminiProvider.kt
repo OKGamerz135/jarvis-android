@@ -125,7 +125,7 @@ class GeminiProvider(
             conn.outputStream.use { it.write(GeminiParsing.buildBody(request).toByteArray(Charsets.UTF_8)) }
 
             val status = conn.responseCode
-            if (status != 200) throw httpFailure(call, status, readErrorBody(conn), request.model)
+            if (status != 200) throw httpFailure(call, conn, status, request.model)
 
             var gotText = false
             val reader = conn.inputStream.bufferedReader(Charsets.UTF_8)
@@ -166,7 +166,7 @@ class GeminiProvider(
         val conn = open(path, "GET", apiKey, 20_000)
         try {
             val status = conn.responseCode
-            if (status != 200) throw httpFailure(call, status, readErrorBody(conn), model)
+            if (status != 200) throw httpFailure(call, conn, status, model)
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val info = GeminiParsing.parseModelInfo(body, model)
             call.ok(status)
@@ -188,7 +188,7 @@ class GeminiProvider(
             conn.outputStream.use { it.write(GeminiParsing.buildBody(request).toByteArray(Charsets.UTF_8)) }
 
             val status = conn.responseCode
-            if (status != 200) throw httpFailure(call, status, readErrorBody(conn), request.model)
+            if (status != 200) throw httpFailure(call, conn, status, request.model)
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readBounded() }
             val text = try {
                 GeminiParsing.textOf(body)
@@ -211,6 +211,8 @@ class GeminiProvider(
 
     private fun open(path: String, method: String, apiKey: String, readTimeoutMs: Int): HttpURLConnection {
         val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
+        // Never follow a redirect: it would send this request, and its key, somewhere nobody chose. See RedirectRefusal.
+        conn.instanceFollowRedirects = false
         conn.requestMethod = method
         conn.connectTimeout = 15_000
         conn.readTimeout = readTimeoutMs
@@ -220,7 +222,12 @@ class GeminiProvider(
         return conn
     }
 
-    private fun httpFailure(call: Call, status: Int, body: String, model: String): LlmException {
+    private fun httpFailure(call: Call, conn: HttpURLConnection, status: Int, model: String): LlmException {
+        if (RedirectRefusal.isRedirect(status)) {
+            val refusal = RedirectRefusal.error(status, conn.getHeaderField("Location"), call.secretsList())
+            return call.failed(status, null, refusal.message, refusal)
+        }
+        val body = readErrorBody(conn)
         val parsed = GeminiParsing.parseFailure(status, body, model, clock(), call.secretsList())
         val message = parsed.apiMessage ?: (parsed.error as? LlmError.NotFromApi)?.snippet
         return call.failed(status, parsed.apiStatus, message, parsed.error)

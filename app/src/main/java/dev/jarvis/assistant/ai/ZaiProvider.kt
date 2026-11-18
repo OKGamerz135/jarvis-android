@@ -199,6 +199,8 @@ class ZaiProvider(
 
     private fun open(path: String, method: String, apiKey: String, readTimeoutMs: Int): HttpURLConnection {
         val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
+        // Never follow a redirect: it would send this request, and its key, somewhere nobody chose. See RedirectRefusal.
+        conn.instanceFollowRedirects = false
         conn.requestMethod = method
         conn.connectTimeout = 15_000
         conn.readTimeout = readTimeoutMs
@@ -209,6 +211,10 @@ class ZaiProvider(
     }
 
     private fun httpFailure(call: Call, conn: HttpURLConnection, status: Int, model: String): LlmException {
+        if (RedirectRefusal.isRedirect(status)) {
+            val refusal = RedirectRefusal.error(status, conn.getHeaderField("Location"), call.secretsList)
+            return call.failed(status, null, refusal.message, refusal)
+        }
         val body = readErrorBody(conn)
         val parsed = ZaiParsing.parseFailure(status, body, conn.getHeaderField("retry-after"), model, clock(), call.secretsList)
         val message = parsed.apiMessage ?: (parsed.error as? LlmError.NotFromApi)?.snippet

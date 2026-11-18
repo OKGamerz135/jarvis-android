@@ -316,6 +316,8 @@ class OpenRouterProvider(
 
     private fun open(path: String, method: String, apiKey: String, readTimeoutMs: Int): HttpURLConnection {
         val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
+        // Never follow a redirect: it would send this request, and its key, somewhere nobody chose. See RedirectRefusal.
+        conn.instanceFollowRedirects = false
         conn.requestMethod = method
         conn.connectTimeout = 15_000
         conn.readTimeout = readTimeoutMs
@@ -333,6 +335,10 @@ class OpenRouterProvider(
         enrich: Boolean,
         apiKey: String? = null,
     ): LlmException {
+        if (RedirectRefusal.isRedirect(status)) {
+            val refusal = RedirectRefusal.error(status, conn.getHeaderField("Location"), call.secretsList)
+            return call.failed(status, null, refusal.message, refusal)
+        }
         val body = readErrorBody(conn)
         val parsed = OpenRouterParsing.parseFailure(
             status, body, conn.getHeaderField("retry-after"), conn.getHeaderField("x-ratelimit-reset"),
