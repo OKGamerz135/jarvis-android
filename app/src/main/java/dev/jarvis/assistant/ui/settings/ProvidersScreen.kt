@@ -4,15 +4,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -96,14 +100,46 @@ fun ProvidersScreen(
     }
 
     Column(modifier) {
-        TabRow(selectedTabIndex = ProvidersTab.entries.indexOf(tab)) {
-            ProvidersTab.entries.forEach { t ->
-                Tab(selected = t == tab, onClick = { onTabChange(t) }, text = { Text(t.title) })
-            }
-        }
+        ProvidersTabRow(tab, onTabChange)
         when (tab) {
             ProvidersTab.Choose -> ChooseChatProviderTab(s, statuses, chat.preferenceError, chat.simulationArmed, vm, chatVm)
             ProvidersTab.Configure -> ConfigureProvidersTab(s, statuses, testStates, onConfigure)
+        }
+    }
+}
+
+/**
+ * The two tabs. Written as a plain row of equal-width, wrapping labels (instead of the stock TabRow, whose tabs have a
+ * fixed height) so that "Configure & Test AI" and "Choose Chat Provider" can take two or three lines on a narrow screen or
+ * with a large font without being cut off. Each tab is at least 48dp tall and is announced as a tab and as selected.
+ */
+@Composable
+private fun ProvidersTabRow(selected: ProvidersTab, onSelect: (ProvidersTab) -> Unit) {
+    Column {
+        Row(Modifier.fillMaxWidth().selectableGroup()) {
+            ProvidersTab.entries.forEach { t ->
+                val isSelected = t == selected
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .selectable(selected = isSelected, onClick = { onSelect(t) }, role = Role.Tab),
+                ) {
+                    Text(
+                        t.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        textAlign = TextAlign.Center,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                    )
+                    HorizontalDivider(
+                        thickness = if (isSelected) 3.dp else 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -181,8 +217,10 @@ private fun ChooseChatProviderTab(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                    // Full-width text first, the on/off switch on its own line below: a long label or a large font never
+                    // squeezes the text into a narrow column next to the switch.
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column {
                             Text(p.label, style = MaterialTheme.typography.titleMedium)
                             st.chatRoleBadges().forEach { badge ->
                                 Text(badge, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -207,8 +245,8 @@ private fun ChooseChatProviderTab(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Use for failover", style = MaterialTheme.typography.labelSmall)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Use for failover", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                             Switch(
                                 checked = p !in s.disabledProviders,
                                 onCheckedChange = { on ->

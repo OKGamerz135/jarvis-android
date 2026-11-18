@@ -343,11 +343,11 @@ private fun ProviderContent(
             )
         }
         if (hasKey || keyState == KeyState.UNREADABLE_NOW) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Text on its own full-width line, the button below it: neither can squeeze the other at a large font.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     if (hasKey) "Key saved, encrypted on this phone." else "A key is stored.",
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
                 )
                 OutlinedButton(onClick = { vm.removeKey(provider) }) { Text("Remove") }
             }
