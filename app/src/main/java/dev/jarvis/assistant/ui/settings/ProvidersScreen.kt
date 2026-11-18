@@ -49,7 +49,6 @@ import dev.jarvis.assistant.providers.TestStatus
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.JarvisSettings
-import dev.jarvis.assistant.settings.KeyState
 import dev.jarvis.assistant.settings.SecureKeyStore
 import dev.jarvis.assistant.settings.SettingsViewModel
 import dev.jarvis.assistant.ui.ProvidersTab
@@ -88,16 +87,7 @@ fun ProvidersScreen(
         return
     }
     // One status model for every card: configured, tested, preferred and active are separate facts (B1).
-    val statuses = AiProvider.entries.associateWith { p ->
-        ProviderStatusModel.of(
-            provider = p,
-            keyState = keyStates[p] ?: KeyState.MISSING,
-            acknowledged = p in s.acknowledged,
-            tests = testStates[p] ?: ProviderTestState(),
-            savedPreferred = s.provider,
-            failoverFrom = chat.preferredProvider,
-        )
-    }
+    val statuses = ProviderStatusModel.all(keyStates, s.acknowledged, testStates, s.provider, chat.preferredProvider)
 
     Column(modifier) {
         ProvidersTabRow(tab, onTabChange)

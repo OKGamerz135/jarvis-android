@@ -51,6 +51,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import dev.jarvis.assistant.ai.ConnectionTestViewModel
 import dev.jarvis.assistant.ai.PromptBuilder
 import dev.jarvis.assistant.ai.TestState
+import dev.jarvis.assistant.chat.ChatViewModel
+import dev.jarvis.assistant.providers.ProviderStatusModel
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.Humour
 import dev.jarvis.assistant.settings.Profanity
@@ -76,9 +78,13 @@ fun SettingsHubScreen(
     onOpenMemory: () -> Unit,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
+    testVm: ConnectionTestViewModel = viewModel(),
+    chatVm: ChatViewModel = viewModel(),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val keys by vm.keyPresent.collectAsStateWithLifecycle()
+    val keyStates by vm.keyState.collectAsStateWithLifecycle()
+    val testStates by testVm.states.collectAsStateWithLifecycle()
+    val chat by chatVm.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshKeys() }
     val s = settings
 
@@ -90,10 +96,11 @@ fun SettingsHubScreen(
         )
         NavCard(
             title = "AI providers",
-            subtitle = if (s == null) "" else {
-                val saved = if (keys[s.provider] == true) "key saved" else "no key yet"
-                "Preferred: ${s.provider.label}, $saved. Failover ${if (s.failoverEnabled) "on" else "off"}"
-            },
+            // The same status model the provider tabs use: configuration and test result are stated separately.
+            subtitle = if (s == null) "" else ProviderStatusModel.hubSummary(
+                ProviderStatusModel.all(keyStates, s.acknowledged, testStates, s.provider, chat.preferredProvider).values,
+                s.failoverEnabled,
+            ),
             onClick = onOpenProvider,
         )
         NavCard(

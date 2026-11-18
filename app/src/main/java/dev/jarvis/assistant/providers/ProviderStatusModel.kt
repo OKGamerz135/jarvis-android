@@ -52,6 +52,9 @@ data class ProviderStatusModel(
 ) {
     val configured: Boolean get() = config == ConfigStatus.CONFIGURED
 
+    /** "configured, not tested" style: configuration first, then what the connection checks showed. */
+    fun shortState(): String = "${config.short()}, ${test.short()}"
+
     /** About the API key only (consent is part of [config], not of the key). */
     fun keyLabel(): String = when (config) {
         ConfigStatus.NO_KEY -> "No API key saved"
@@ -100,6 +103,36 @@ data class ProviderStatusModel(
             )
         }
 
+        /** The model of every provider, built the one way every screen uses (so no screen has its own status logic). */
+        fun all(
+            keyStates: Map<AiProvider, KeyState>,
+            acknowledged: Set<AiProvider>,
+            tests: Map<AiProvider, ProviderTestState>,
+            savedPreferred: AiProvider,
+            failoverFrom: AiProvider?,
+        ): Map<AiProvider, ProviderStatusModel> = AiProvider.entries.associateWith { p ->
+            of(p, keyStates[p] ?: KeyState.MISSING, p in acknowledged, tests[p] ?: ProviderTestState(), savedPreferred, failoverFrom)
+        }
+
+        /**
+         * The one-line-or-two status for the Settings hub card. It names the preferred provider (the user's choice) and,
+         * during an automatic switch, separately the provider answering now. Configuration and testing are stated
+         * separately and a saved key alone is never called "ready" or "tested".
+         */
+        fun hubSummary(all: Collection<ProviderStatusModel>, failoverEnabled: Boolean): String {
+            val failover = "Failover ${if (failoverEnabled) "on" else "off"}."
+            val preferred = all.firstOrNull { it.preferred } ?: return failover
+            val answering = all.firstOrNull { it.active || it.chatBlocked }
+            if (preferred.preferredPaused && answering != null && answering.viaFailover) {
+                return "Preferred: ${preferred.provider.label} (paused). Answering now: ${answering.provider.label} " +
+                    "(automatic failover, ${answering.shortState()}). $failover"
+            }
+            if (preferred.chatBlocked) {
+                return "Preferred: ${preferred.provider.label}, ${preferred.config.short()}. Chat can't answer until this is fixed. $failover"
+            }
+            return "Preferred: ${preferred.provider.label}, ${preferred.shortState()}. $failover"
+        }
+
         /**
          * One line per check that has something to show, in plain words, taken straight from the stored results (nothing
          * is run to produce them). Empty when nothing has been tested. The diagnostics verdict text is not repeated here.
@@ -140,4 +173,19 @@ data class ProviderStatusModel(
             else -> TestStatus.NOT_TESTED
         }
     }
+}
+
+private fun ConfigStatus.short(): String = when (this) {
+    ConfigStatus.NO_KEY -> "no API key"
+    ConfigStatus.KEY_UNREADABLE -> "key can't be read"
+    ConfigStatus.NEEDS_CONSENT -> "needs your consent"
+    ConfigStatus.CONFIGURED -> "configured"
+}
+
+private fun TestStatus.short(): String = when (this) {
+    TestStatus.NOT_TESTED -> "not tested"
+    TestStatus.RUNNING -> "testing"
+    TestStatus.FAILED -> "last test failed"
+    TestStatus.ACCEPTED -> "key accepted, generation not tested"
+    TestStatus.PASSED -> "test passed"
 }

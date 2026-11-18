@@ -185,4 +185,63 @@ class ProviderStatusModelTest {
         val d = ProviderStatusModel.testDetails(none.copy(availability = AvailabilityState.Running, generation = TestState.Running("", null)))
         assertEquals(listOf("Availability check: running", "Generation test: running"), d)
     }
+
+    // ------------------------------------------------------------------ Settings hub summary
+
+    private fun hub(
+        preferred: AiProvider = G, from: AiProvider? = null, failover: Boolean = true,
+        keys: Map<AiProvider, KeyState> = emptyMap(), ack: Set<AiProvider> = AiProvider.entries.toSet(),
+        tests: Map<AiProvider, ProviderTestState> = emptyMap(),
+    ) = ProviderStatusModel.hubSummary(
+        ProviderStatusModel.all(AiProvider.entries.associateWith { keys[it] ?: KeyState.USABLE }, ack, tests, preferred, from).values,
+        failover,
+    )
+
+    @Test fun aSavedKeyIsConfiguredNotReadyAndNotTested() {
+        val t = hub()
+        assertEquals("Preferred: ${G.label}, configured, not tested. Failover on.", t)
+        assertFalse(t.contains("ready", ignoreCase = true)); assertFalse(t.contains("passed"))
+    }
+
+    @Test fun onlyARealPassedTestSaysPassed() {
+        val t = hub(tests = mapOf(G to none.copy(generation = genDone)))
+        assertEquals("Preferred: ${G.label}, configured, test passed. Failover on.", t)
+        assertTrue(hub(tests = mapOf(G to none.copy(availability = availOk))).contains("generation not tested"))
+        assertTrue(hub(tests = mapOf(G to none.copy(generation = TestState.Failed("x", null)))).contains("last test failed"))
+    }
+
+    @Test fun missingUnreadableAndConsentProblemsAreNamed() {
+        assertTrue(hub(keys = mapOf(G to KeyState.MISSING)).contains("no API key"))
+        assertTrue(hub(keys = mapOf(G to KeyState.UNREADABLE_NOW)).contains("key can't be read"))
+        assertTrue(hub(ack = emptySet()).contains("needs your consent"))
+    }
+
+    @Test fun aBlockedPreferredProviderSaysChatCannotAnswerAndNeverMentionsTests() {
+        val t = hub(keys = mapOf(G to KeyState.MISSING), tests = mapOf(G to none.copy(generation = genDone)))
+        assertEquals("Preferred: ${G.label}, no API key. Chat can't answer until this is fixed. Failover on.", t)
+    }
+
+    @Test fun duringAnAutomaticSwitchPreferredAndAnsweringNowAreSeparate() {
+        val t = hub(preferred = Q, from = G)
+        assertEquals(
+            "Preferred: ${G.label} (paused). Answering now: ${Q.label} (automatic failover, configured, not tested). Failover on.", t,
+        )
+    }
+
+    @Test fun failoverStateIsShown() {
+        assertTrue(hub(failover = false).endsWith("Failover off."))
+        assertTrue(hub(failover = true).endsWith("Failover on."))
+    }
+
+    @Test fun theSummaryIsShortEnoughForACard() {
+        for (case in listOf(hub(), hub(preferred = Q, from = G), hub(keys = mapOf(G to KeyState.MISSING))))
+            assertTrue(case, case.length < 140)
+    }
+
+    @Test fun theSharedBuilderGivesEveryProviderExactlyOneModelWithTheSameRules() {
+        val all = ProviderStatusModel.all(emptyMap(), emptySet(), emptyMap(), G, null)
+        assertEquals(AiProvider.entries.toSet(), all.keys)
+        assertTrue(all.values.all { it.config == ConfigStatus.NO_KEY && it.test == TestStatus.NOT_TESTED })
+        assertEquals(1, all.values.count { it.preferred })
+    }
 }
