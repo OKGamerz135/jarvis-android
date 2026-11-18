@@ -63,9 +63,17 @@ class SecureKeyStore(context: Context) {
     /** Reads the key to find out whether it is really usable. Background thread only. */
     fun state(name: String): KeyState = vault.state(name)
 
-    private fun key(): SecretKey {
+    // Finding or creating the key is shared by every SecureKeyStore instance in the process; see KeyProvisioner (P-04).
+    private val keyProvisioner = KeyProvisioner(find = ::findKey, create = ::createKey)
+
+    private fun key(): SecretKey = keyProvisioner.getOrCreate()
+
+    private fun findKey(): SecretKey? {
         val keyStore = KeyStore.getInstance(PROVIDER).apply { load(null) }
-        (keyStore.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        return keyStore.getKey(ALIAS, null) as? SecretKey
+    }
+
+    private fun createKey(): SecretKey {
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, PROVIDER)
         generator.init(
             KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
