@@ -117,4 +117,73 @@ class NavStateTest {
         val n = NavState().open(Screen.Providers).openProvider(AiProvider.GROQ).selectTab(ProvidersTab.Choose)
         assertEquals(AiProvider.GROQ, n.editing)
     }
+
+    // ------------------------------------------------------------------ B7: restoration and Back from provider setup
+
+    @Test fun backFromProviderSetupAlwaysLandsOnTheConfigureTab() {
+        val n = NavState().open(Screen.Providers).selectTab(ProvidersTab.Choose).openProvider(AiProvider.GROQ).selectTab(ProvidersTab.Choose)
+        val b = n.back()
+        assertEquals(Screen.Providers, b.current)
+        assertEquals(ProvidersTab.Configure, b.providersTab)
+        assertNull(b.editing)
+    }
+
+    @Test fun backFromProvidersKeepsTheChosenTabForNextTime() {
+        val n = NavState().open(Screen.Settings).open(Screen.Providers).selectTab(ProvidersTab.Choose)
+        assertEquals(ProvidersTab.Choose, n.back().providersTab)
+    }
+
+    @Test fun savedStateWithProviderSetupAlwaysRestoresToTheConfigureTab() {
+        val tampered = NavState.decode("Home,Providers,Provider|GROQ|Choose")
+        assertEquals(Screen.Provider, tampered.current)
+        assertEquals(AiProvider.GROQ, tampered.editing)
+        assertEquals(ProvidersTab.Configure, tampered.providersTab)
+        assertEquals(ProvidersTab.Configure, tampered.back().providersTab)
+    }
+
+    @Test fun theChooseTabIsRestoredWhenNoSetupScreenIsOpen() {
+        val n = NavState.decode(NavState().open(Screen.Providers).selectTab(ProvidersTab.Choose).encode())
+        assertEquals(Screen.Providers, n.current); assertEquals(ProvidersTab.Choose, n.providersTab)
+    }
+
+    @Test fun everyReachableStateSurvivesRotationAndProcessRecreation() {
+        // Explores every state reachable with up to 4 actions and checks the saved text restores it exactly.
+        val actions: List<(NavState) -> NavState> =
+            Screen.entries.filter { it != Screen.Provider }.map { s -> { n: NavState -> n.open(s) } } +
+                AiProvider.entries.map { p -> { n: NavState -> n.openProvider(p) } } +
+                ProvidersTab.entries.map { t -> { n: NavState -> n.selectTab(t) } } +
+                listOf({ n: NavState -> n.back() }, { n: NavState -> n.home() })
+        var frontier = setOf(NavState())
+        val seen = HashSet<NavState>(frontier)
+        repeat(4) {
+            frontier = frontier.flatMap { n -> actions.map { it(n) } }.filter { seen.add(it) }.toSet()
+        }
+        assertTrue(seen.size > 100)
+        for (n in seen) {
+            assertEquals(n, NavState.decode(n.encode()))
+            if (Screen.Provider in n.stack) {
+                assertEquals(Screen.Provider, n.current)               // only ever on top
+                assertTrue(n.editing != null)                           // always knows its provider
+                assertEquals(ProvidersTab.Configure, n.providersTab)    // and returns to Configure
+            } else assertNull(n.editing)
+        }
+    }
+
+    @Test fun savedTextNeverContainsAnythingButScreensProvidersAndTabs() {
+        // Nothing secret can be in the saved navigation state: it is built only from enum names.
+        val n = NavState().open(Screen.Providers).openProvider(AiProvider.GEMINI)
+        assertTrue(n.encode().all { it.isLetter() || it == ',' || it == '|' })
+    }
+
+    @Test fun openingAnotherScreenFromProviderSetupLeavesTheSetupScreen() {
+        val n = NavState().open(Screen.Providers).openProvider(AiProvider.GROQ).open(Screen.Memory)
+        assertEquals(listOf(Screen.Home, Screen.Providers, Screen.Memory), n.stack)
+        assertNull(n.editing)
+        assertEquals(Screen.Providers, n.back().current)
+    }
+
+    @Test fun tabsCannotBeChangedWhileProviderSetupIsOpen() {
+        val n = NavState().open(Screen.Providers).openProvider(AiProvider.GROQ)
+        assertEquals(n, n.selectTab(ProvidersTab.Choose))
+    }
 }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -322,7 +323,9 @@ private fun ProviderContent(
         }
 
         SectionTitle("Model")
-        var model by remember(provider) { mutableStateOf(s.modelFor(provider)) }
+        // Saved across rotation and process recreation. It is the same text that is written to the settings on every edit,
+        // so the field and the saved model agree. (The API key field below is deliberately NOT saved this way.)
+        var model by rememberSaveable(provider) { mutableStateOf(s.modelFor(provider)) }
         OutlinedTextField(
             value = model,
             onValueChange = { v ->
@@ -358,6 +361,8 @@ private fun ProviderContent(
                 OutlinedButton(onClick = { vm.removeKey(provider) }) { Text("Remove") }
             }
         }
+        // Plain `remember` on purpose: an API key must never go into saved instance state (it would end up in the system's
+        // saved-state storage). After rotation the field is empty and the key has to be pasted again.
         var keyInput by remember(provider) { mutableStateOf("") }
         OutlinedTextField(
             value = keyInput,

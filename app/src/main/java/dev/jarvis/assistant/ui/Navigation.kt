@@ -41,13 +41,18 @@ data class NavState(
     fun open(screen: Screen): NavState {
         require(screen != Screen.Provider) { "Use openProvider(provider) for the provider configuration screen" }
         if (screen == current) return this
-        val at = stack.indexOf(screen)
-        val next = if (at >= 0) stack.subList(0, at + 1) else stack + screen
-        return NavState(next, editing.takeIf { Screen.Provider in next }, providersTab)
+        // A provider's setup screen is only ever the top entry: opening another screen from it leaves it (it is not
+        // kept underneath), so a saved state can never contain a setup screen that is not on top.
+        val base = if (current == Screen.Provider) stack.dropLast(1) else stack
+        val at = base.indexOf(screen)
+        val next = if (at >= 0) base.subList(0, at + 1) else base + screen
+        return NavState(next, editing.takeIf { Screen.Provider in next }, if (current == Screen.Provider) ProvidersTab.Configure else providersTab)
     }
 
-    /** Shows [tab] on the AI providers screen. Nothing else changes. */
-    fun selectTab(tab: ProvidersTab): NavState = copy(providersTab = tab)
+    /** Shows [tab] on the AI providers screen. Nothing else changes (and it does nothing while a provider's setup is open). */
+    fun selectTab(tab: ProvidersTab): NavState =
+        if (current == Screen.Provider) this // the tabs are not on screen while a provider's setup is open
+        else copy(providersTab = tab)
 
     /**
      * Opens the configuration screen of [provider]. If one is already open it shows [provider] instead of stacking.
@@ -57,11 +62,15 @@ data class NavState(
         if (current == Screen.Provider) copy(editing = provider)
         else NavState(stack + Screen.Provider, provider, ProvidersTab.Configure)
 
+    /**
+     * Back to the screen the user came from. Leaving a provider's "Key and model" screen always lands on the Configure
+     * tab (that is where it was opened from), even if the tab was changed while it was open.
+     */
     fun back(): NavState =
         if (!canGoBack) this
         else {
             val next = stack.dropLast(1)
-            NavState(next, editing.takeIf { Screen.Provider in next }, providersTab)
+            NavState(next, editing.takeIf { Screen.Provider in next }, if (current == Screen.Provider) ProvidersTab.Configure else providersTab)
         }
 
     /** Back to the chat, forgetting everything in between. */
@@ -85,7 +94,8 @@ data class NavState(
                 // The provider screen is only valid when it is on top and knows its provider.
                 return NavState()
             }
-            return NavState(stack, editing.takeIf { Screen.Provider in stack }, tab)
+            // A provider's setup screen is only ever opened from the Configure tab, so that is the tab it returns to.
+            return NavState(stack, editing.takeIf { Screen.Provider in stack }, if (Screen.Provider in stack) ProvidersTab.Configure else tab)
         }
     }
 }
