@@ -41,6 +41,7 @@ import dev.jarvis.assistant.diag.UsageGuard
 import dev.jarvis.assistant.providers.ConfigStatus
 import dev.jarvis.assistant.providers.ProviderStatus
 import dev.jarvis.assistant.providers.ProviderStatusModel
+import dev.jarvis.assistant.providers.TestStatus
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.JarvisSettings
@@ -102,7 +103,7 @@ fun ProvidersScreen(
         }
         when (tab) {
             ProvidersTab.Choose -> ChooseChatProviderTab(s, statuses, chat.preferenceError, chat.simulationArmed, vm, chatVm)
-            ProvidersTab.Configure -> ConfigureProvidersTab(statuses, onConfigure)
+            ProvidersTab.Configure -> ConfigureProvidersTab(s, statuses, testStates, onConfigure)
         }
     }
 }
@@ -254,12 +255,15 @@ private fun ChooseChatProviderTab(
 // --------------------------------------------------------------------------- Configure & Test AI
 
 /**
- * The entry point for setting a provider up. The key, model and checks themselves are on each provider's own screen
- * ("Key and model"). Nothing here changes which provider answers chats.
+ * One card per provider: configuration, key and last connection-test status, read from the existing results. Opening this
+ * tab never starts a check. Checks are run from each provider's own screen ("Key and model"), where the key, the model
+ * and the checks for THAT provider are. Nothing here changes which provider answers chats.
  */
 @Composable
 private fun ConfigureProvidersTab(
+    s: JarvisSettings,
     statuses: Map<AiProvider, ProviderStatusModel>,
+    testStates: Map<AiProvider, ProviderTestState>,
     onConfigure: (AiProvider) -> Unit,
 ) {
     val context = LocalContext.current
@@ -269,20 +273,36 @@ private fun ConfigureProvidersTab(
 
     ScreenColumn(Modifier) {
         Text(
-            "Set up a provider's API key and model and run connection checks. This never changes which provider answers " +
-                "your chats; use the Choose Chat Provider tab for that.",
+            "Set up each provider's API key and model, and run connection checks from its \"Key and model\" screen. " +
+                "This tab only shows the latest results; it never starts a check and never changes which provider answers " +
+                "your chats (use the Choose Chat Provider tab for that).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Test results last until you change that provider's key or model, or the app restarts.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         AiProvider.entries.forEach { p ->
             val st = statuses.getValue(p)
+            val details = ProviderStatusModel.testDetails(testStates[p] ?: ProviderTestState())
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(p.label, style = MaterialTheme.typography.titleMedium)
-                    Text("${st.config.label}. ${st.test.label}.", style = MaterialTheme.typography.bodySmall)
+                    Text("Configuration: ${st.config.label}", style = MaterialTheme.typography.bodyMedium)
+                    Text(st.keyLabel(), style = MaterialTheme.typography.bodySmall)
+                    Text("Model: ${s.modelOf(p)}", style = MaterialTheme.typography.bodySmall)
+                    // "Configured" is not "tested": the test status is its own line, from the stored results only.
+                    Text(
+                        "Connection test: ${st.test.label}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (st.test == TestStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
+                    details.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     ActionRow {
                         OutlinedButton(onClick = { onConfigure(p) }) { Text("Key and model") }
                         if (p == AiProvider.OPENROUTER && st.configured) {

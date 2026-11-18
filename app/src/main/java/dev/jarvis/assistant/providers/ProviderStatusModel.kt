@@ -52,6 +52,13 @@ data class ProviderStatusModel(
 ) {
     val configured: Boolean get() = config == ConfigStatus.CONFIGURED
 
+    /** About the API key only (consent is part of [config], not of the key). */
+    fun keyLabel(): String = when (config) {
+        ConfigStatus.NO_KEY -> "No API key saved"
+        ConfigStatus.KEY_UNREADABLE -> "A key is stored but can't be read right now, so it isn't being used"
+        ConfigStatus.NEEDS_CONSENT, ConfigStatus.CONFIGURED -> "API key saved (encrypted on this phone)"
+    }
+
     /** Short labels for the chat-provider roles, for the Choose Chat Provider tab. Says nothing about testing. */
     fun chatRoleBadges(): List<String> = buildList {
         if (preferred) add(if (preferredPaused) "Preferred (paused by automatic failover)" else "Preferred")
@@ -91,6 +98,31 @@ data class ProviderStatusModel(
                 preferredPaused = episode && provider == failoverFrom,
                 chatBlocked = selectedForChat && !configured,
             )
+        }
+
+        /**
+         * One line per check that has something to show, in plain words, taken straight from the stored results (nothing
+         * is run to produce them). Empty when nothing has been tested. The diagnostics verdict text is not repeated here.
+         */
+        fun testDetails(t: ProviderTestState): List<String> = buildList {
+            when (val a = t.availability) {
+                AvailabilityState.Idle -> {}
+                AvailabilityState.Running -> add("Availability check: running")
+                is AvailabilityState.Ok -> add("Availability check: the key is accepted and model \"${a.model}\" exists")
+                is AvailabilityState.Failed -> add("Availability check failed: ${a.message}")
+            }
+            when (val g = t.generation) {
+                TestState.Idle -> {}
+                is TestState.Running -> add("Generation test: running")
+                is TestState.Done -> add("Generation test: a reply came back")
+                is TestState.Failed -> add("Generation test failed: ${g.message}")
+            }
+            when (val d = t.diagnostics) {
+                DiagState.Idle -> {}
+                is DiagState.Running -> add("Diagnostics: running")
+                is DiagState.Done -> add("Diagnostics were run (see the verdict on the provider's screen)")
+                is DiagState.Failed -> add("Diagnostics could not finish: ${d.message}")
+            }
         }
 
         /**

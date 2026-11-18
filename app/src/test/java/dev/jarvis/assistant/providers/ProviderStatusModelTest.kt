@@ -142,4 +142,47 @@ class ProviderStatusModelTest {
         for (t in listOf(none, none.copy(generation = genDone)))
             assertTrue(status(p = G, preferred = G, tests = t).chatRoleBadges().none { it.contains("test", ignoreCase = true) })
     }
+
+    // ------------------------------------------------------------------ Configure & Test AI tab text
+
+    @Test fun keyLabelDescribesOnlyTheKey() {
+        assertEquals("No API key saved", status(key = KeyState.MISSING).keyLabel())
+        assertTrue(status(key = KeyState.UNREADABLE_NOW).keyLabel().contains("can't be read"))
+        assertTrue(status().keyLabel().startsWith("API key saved"))
+        // Missing consent doesn't make the key look missing.
+        assertTrue(status(ack = false).keyLabel().startsWith("API key saved"))
+    }
+
+    @Test fun nothingTestedMeansNoDetailLines() {
+        assertEquals(emptyList<String>(), ProviderStatusModel.testDetails(none))
+    }
+
+    @Test fun detailsReportEachCheckHonestly() {
+        val d = ProviderStatusModel.testDetails(
+            none.copy(availability = availOk, generation = TestState.Failed("quota exceeded", null), diagnostics = DiagState.Failed("no network")),
+        )
+        assertEquals(
+            listOf(
+                "Availability check: the key is accepted and model \"m\" exists",
+                "Generation test failed: quota exceeded",
+                "Diagnostics could not finish: no network",
+            ),
+            d,
+        )
+    }
+
+    @Test fun anAvailabilityOkLineNeverClaimsAGenerationReply() {
+        val d = ProviderStatusModel.testDetails(none.copy(availability = availOk))
+        assertEquals(1, d.size)
+        assertFalse(d.any { it.contains("reply") })
+    }
+
+    @Test fun aGenerationReplyIsReportedAsAReplyOnly() {
+        assertEquals(listOf("Generation test: a reply came back"), ProviderStatusModel.testDetails(none.copy(generation = genDone)))
+    }
+
+    @Test fun runningChecksShowAsRunning() {
+        val d = ProviderStatusModel.testDetails(none.copy(availability = AvailabilityState.Running, generation = TestState.Running("", null)))
+        assertEquals(listOf("Availability check: running", "Generation test: running"), d)
+    }
 }
