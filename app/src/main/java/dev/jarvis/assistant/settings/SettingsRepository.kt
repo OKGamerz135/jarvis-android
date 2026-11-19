@@ -25,7 +25,10 @@ class SettingsRepository(context: Context) {
         .map { it.toSettings() }
 
     suspend fun update(transform: (JarvisSettings) -> JarvisSettings) {
-        store.edit { prefs -> prefs.write(transform(prefs.toSettings())) }
+        store.edit { prefs ->
+            val before = prefs.toSettings()
+            prefs.write(transform(before), before)
+        }
     }
 
     private companion object {
@@ -49,14 +52,14 @@ class SettingsRepository(context: Context) {
         val ORDER = stringPreferencesKey("provider_order")
         val DISABLED = stringSetPreferencesKey("disabled_providers")
 
-        fun providersFrom(names: Collection<String>): List<AiProvider> =
-            names.mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
+        fun Preferences.rawProviderPrefs() = RawProviderPrefs(this[PROVIDER], this[ACKNOWLEDGED], this[ORDER], this[DISABLED])
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
             enumValues<E>().firstOrNull { it.name == name } ?: default
 
         fun Preferences.toSettings(): JarvisSettings {
             val d = JarvisSettings()
+            val providers = ProviderPrefsCodec.decode(rawProviderPrefs(), d.provider, d.providerOrder)
             return JarvisSettings(
                 personality = enumOr(this[PERSONALITY], d.personality),
                 tone = enumOr(this[TONE], d.tone),
@@ -66,23 +69,26 @@ class SettingsRepository(context: Context) {
                 language = this[LANGUAGE] ?: d.language,
                 addressAs = this[ADDRESS] ?: d.addressAs,
                 customInstructions = this[CUSTOM] ?: d.customInstructions,
-                provider = enumOr(this[PROVIDER], d.provider),
+                provider = providers.provider,
                 geminiModel = this[GEMINI_MODEL] ?: d.geminiModel,
                 groqModel = this[GROQ_MODEL] ?: d.groqModel,
                 openrouterModel = this[OPENROUTER_MODEL] ?: d.openrouterModel,
                 cloudflareModel = this[CLOUDFLARE_MODEL] ?: d.cloudflareModel,
                 zaiModel = this[ZAI_MODEL] ?: d.zaiModel,
-                acknowledged = (this[ACKNOWLEDGED] ?: emptySet())
-                    .mapNotNull { n -> AiProvider.entries.firstOrNull { it.name == n } }
-                    .toSet(),
+                acknowledged = providers.acknowledged,
                 failoverEnabled = this[FAILOVER] ?: d.failoverEnabled,
                 memoryEnabled = this[MEMORY_ENABLED] ?: d.memoryEnabled,
-                providerOrder = this[ORDER]?.split(",")?.let { providersFrom(it) }?.ifEmpty { null } ?: d.providerOrder,
-                disabledProviders = providersFrom(this[DISABLED] ?: emptySet()).toSet(),
+                providerOrder = providers.order,
+                disabledProviders = providers.disabled,
             )
         }
 
-        fun androidx.datastore.preferences.core.MutablePreferences.write(s: JarvisSettings) {
+        fun androidx.datastore.preferences.core.MutablePreferences.write(s: JarvisSettings, before: JarvisSettings) {
+            val providers = ProviderPrefsCodec.encode(
+                new = ProviderPrefs(s.provider, s.acknowledged, s.providerOrder, s.disabledProviders),
+                before = ProviderPrefs(before.provider, before.acknowledged, before.providerOrder, before.disabledProviders),
+                existing = rawProviderPrefs(),
+            )
             this[PERSONALITY] = s.personality.name
             this[TONE] = s.tone.name
             this[HUMOUR] = s.humour
@@ -91,17 +97,17 @@ class SettingsRepository(context: Context) {
             this[LANGUAGE] = s.language
             this[ADDRESS] = s.addressAs
             this[CUSTOM] = s.customInstructions
-            this[PROVIDER] = s.provider.name
+            this[PROVIDER] = providers.provider
             this[GEMINI_MODEL] = s.geminiModel
             this[GROQ_MODEL] = s.groqModel
             this[OPENROUTER_MODEL] = s.openrouterModel
             this[CLOUDFLARE_MODEL] = s.cloudflareModel
             this[ZAI_MODEL] = s.zaiModel
-            this[ACKNOWLEDGED] = s.acknowledged.map { it.name }.toSet()
+            this[ACKNOWLEDGED] = providers.acknowledged
             this[FAILOVER] = s.failoverEnabled
             this[MEMORY_ENABLED] = s.memoryEnabled
-            this[ORDER] = s.providerOrder.joinToString(",") { it.name }
-            this[DISABLED] = s.disabledProviders.map { it.name }.toSet()
+            this[ORDER] = providers.order
+            this[DISABLED] = providers.disabled
         }
     }
 }
