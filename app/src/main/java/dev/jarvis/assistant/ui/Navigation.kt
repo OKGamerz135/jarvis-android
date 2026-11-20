@@ -1,6 +1,6 @@
 package dev.jarvis.assistant.ui
 
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.providers.ProviderId
 
 // Pure Kotlin on purpose (no android.* imports) so it can be unit-tested on the build server.
 
@@ -27,10 +27,14 @@ enum class ProvidersTab(val title: String) {
  *
  * [editing] is the provider whose configuration screen is open. It belongs to the [Screen.Provider] entry only and is
  * never the provider used for chat; a Provider screen without a provider cannot exist.
+ *
+ * Navigation is built-in-only until custom providers have their own storage (C4): [editing] is always a built-in
+ * [ProviderId]. [ProviderId.parse] also accepts well-formed custom ids, so that is checked here explicitly: a custom id
+ * is refused by [openProvider] and a saved state that names one restores to the chat.
  */
 data class NavState(
     val stack: List<Screen> = listOf(Screen.Home),
-    val editing: AiProvider? = null,
+    val editing: ProviderId? = null,
     /** The tab shown on the AI providers screen. It only decides what is displayed; it never changes any setting. */
     val providersTab: ProvidersTab = ProvidersTab.Configure,
 ) {
@@ -58,7 +62,12 @@ data class NavState(
      * Opens the configuration screen of [provider]. If one is already open it shows [provider] instead of stacking.
      * Configuring belongs to the Configure tab, so Back from it returns there.
      */
-    fun openProvider(provider: AiProvider): NavState =
+    fun openProvider(provider: ProviderId): NavState {
+        require(provider.isBuiltIn) { "Only built-in providers have a configuration screen yet" }
+        return openBuiltIn(provider)
+    }
+
+    private fun openBuiltIn(provider: ProviderId): NavState =
         if (current == Screen.Provider) copy(editing = provider)
         else NavState(stack + Screen.Provider, provider, ProvidersTab.Configure)
 
@@ -76,7 +85,7 @@ data class NavState(
     /** Back to the chat, forgetting everything in between. */
     fun home(): NavState = NavState()
 
-    fun encode(): String = stack.joinToString(",") { it.name } + "|" + (editing?.name ?: "") + "|" + providersTab.name
+    fun encode(): String = stack.joinToString(",") { it.name } + "|" + (editing?.value ?: "") + "|" + providersTab.name
 
     companion object {
         /** Restores a saved state. Anything that does not make sense falls back to the chat instead of crashing. */
@@ -87,7 +96,9 @@ data class NavState(
             if (parts.size != 2 && parts.size != 3) return NavState()
             val tab = if (parts.size == 3) ProvidersTab.entries.firstOrNull { it.name == parts[2] } ?: return NavState() else ProvidersTab.Configure
             val stack = parts[0].split(",").map { n -> Screen.entries.firstOrNull { it.name == n } ?: return NavState() }
-            val editing = AiProvider.entries.firstOrNull { it.name == parts[1] }
+            // The saved provider text is blank (none) or exactly a built-in id. A custom-shaped, unknown or malformed id is
+            // never mapped to anything else: the whole saved state is refused and the app starts at the chat.
+            val editing = if (parts[1].isEmpty()) null else ProviderId.parse(parts[1])?.takeIf { it.isBuiltIn } ?: return NavState()
             if (stack.isEmpty() || stack.first() != Screen.Home) return NavState()
             if (stack.distinct().size != stack.size) return NavState()
             if (Screen.Provider in stack && (editing == null || stack.last() != Screen.Provider)) {

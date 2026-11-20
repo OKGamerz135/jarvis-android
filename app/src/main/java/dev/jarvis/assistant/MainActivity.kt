@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,7 +45,11 @@ import dev.jarvis.assistant.ui.settings.MemoryScreen
 import dev.jarvis.assistant.ui.settings.PersonalIntelligenceScreen
 import dev.jarvis.assistant.ui.NavState
 import dev.jarvis.assistant.ui.Screen
+import dev.jarvis.assistant.providers.ProviderSetup
+import dev.jarvis.assistant.providers.ProviderSetupResolver
+import dev.jarvis.assistant.settings.SettingsViewModel
 import dev.jarvis.assistant.ui.settings.ProviderScreen
+import dev.jarvis.assistant.ui.settings.UnavailableProviderCard
 import dev.jarvis.assistant.ui.settings.ProvidersScreen
 import dev.jarvis.assistant.ui.settings.SettingsHubScreen
 import dev.jarvis.assistant.ui.theme.JarvisTheme
@@ -68,6 +74,7 @@ private fun JarvisApp() {
         mutableStateOf(NavState())
     }
     val chatVm: ChatViewModel = viewModel()
+    val registry = viewModel<SettingsViewModel>().registry
     val screen = nav.current
     BackHandler(enabled = nav.canGoBack) { nav = nav.back() }
 
@@ -75,7 +82,7 @@ private fun JarvisApp() {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(if (screen == Screen.Provider) nav.editing?.label ?: screen.title else screen.title) },
+                title = { Text(if (screen == Screen.Provider) nav.editing?.let { registry.get(it)?.label } ?: screen.title else screen.title) },
                 navigationIcon = {
                     if (nav.canGoBack) {
                         IconButton(onClick = { nav = nav.back() }) {
@@ -118,12 +125,16 @@ private fun JarvisApp() {
             )
             Screen.Provider -> {
                 val editing = nav.editing
-                if (editing != null) {
-                    ProviderScreen(
-                        editing = editing,
+                // Only a registered built-in provider has a working setup screen. Anything else is read-only or leaves the
+                // screen; it never shows another provider's.
+                when (val setup = editing?.let { ProviderSetupResolver.resolve(it, registry) }) {
+                    is ProviderSetup.Editable -> ProviderScreen(
+                        editing = setup.provider,
                         onConfigureOther = { nav = nav.openProvider(it) },
                         modifier = modifier,
                     )
+                    is ProviderSetup.Unavailable -> Box(modifier) { UnavailableProviderCard(setup.descriptor) }
+                    ProviderSetup.Unknown, null -> LaunchedEffect(Unit) { nav = nav.back() }
                 }
             }
             Screen.Diagnostics -> DiagnosticsScreen(modifier)

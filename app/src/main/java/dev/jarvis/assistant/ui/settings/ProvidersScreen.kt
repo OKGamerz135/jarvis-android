@@ -46,6 +46,7 @@ import dev.jarvis.assistant.providers.ConfigStatus
 import dev.jarvis.assistant.providers.ProviderStatus
 import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.ProviderSetupResolver
 import dev.jarvis.assistant.providers.ProviderStatusModel
 import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.providers.TestStatus
@@ -72,7 +73,7 @@ import java.time.ZoneId
 fun ProvidersScreen(
     tab: ProvidersTab,
     onTabChange: (ProvidersTab) -> Unit,
-    onConfigure: (AiProvider) -> Unit,
+    onConfigure: (ProviderId) -> Unit,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
     chatVm: ChatViewModel = viewModel(),
@@ -98,7 +99,7 @@ fun ProvidersScreen(
         ProvidersTabRow(tab, onTabChange)
         when (tab) {
             ProvidersTab.Choose -> ChooseChatProviderTab(s, statuses, chat.preferenceError, chat.simulationArmed, vm, chatVm)
-            ProvidersTab.Configure -> ConfigureProvidersTab(s, statuses, testStates, onConfigure)
+            ProvidersTab.Configure -> ConfigureProvidersTab(vm.registry, s, statuses, testStates, onConfigure)
         }
     }
 }
@@ -294,10 +295,11 @@ private fun ChooseChatProviderTab(
  */
 @Composable
 private fun ConfigureProvidersTab(
+    registry: ProviderRegistry,
     s: JarvisSettings,
     statuses: Map<ProviderId, ProviderStatusModel>,
     testStates: Map<ProviderId, ProviderTestState>,
-    onConfigure: (AiProvider) -> Unit,
+    onConfigure: (ProviderId) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -317,7 +319,10 @@ private fun ConfigureProvidersTab(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        AiProvider.entries.forEach { p ->
+        ProviderSetupResolver.configureRows(registry).forEach { row ->
+            // A provider that cannot be set up yet (custom, until C4) is listed read-only: no key, model, consent or test
+            // state is shown for it, and nothing here can reach another provider's.
+            val p = row.provider ?: run { UnavailableProviderCard(row.descriptor); return@forEach }
             val st = statuses.getValue(p.toId())
             val details = ProviderStatusModel.testDetails(testStates[p.toId()] ?: ProviderTestState())
             Card(
@@ -337,7 +342,7 @@ private fun ConfigureProvidersTab(
                     )
                     details.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     ActionRow {
-                        OutlinedButton(onClick = { onConfigure(p) }) { Text("Key and model") }
+                        OutlinedButton(onClick = { onConfigure(p.toId()) }) { Text("Key and model") }
                         if (p == AiProvider.OPENROUTER && st.configured) {
                             OutlinedButton(
                                 enabled = !quotaBusy,
@@ -371,4 +376,18 @@ private fun move(order: List<AiProvider>, index: Int, delta: Int): List<AiProvid
     val item = list.removeAt(index)
     list.add(target, item)
     return list
+}
+
+/** A registered provider that has no setup screen yet. It shows only its own name; nothing from any other provider. */
+@Composable
+internal fun UnavailableProviderCard(descriptor: dev.jarvis.assistant.providers.ProviderDescriptor) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(descriptor.label, style = MaterialTheme.typography.titleMedium)
+            Text("Not available yet: this provider can't be set up or used for chat in this version.", style = MaterialTheme.typography.bodyMedium)
+        }
+    }
 }

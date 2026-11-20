@@ -260,7 +260,7 @@ private fun PersonalIntelligenceContent(s: JarvisSettings, vm: SettingsViewModel
 @Composable
 fun ProviderScreen(
     editing: AiProvider,
-    onConfigureOther: (AiProvider) -> Unit,
+    onConfigureOther: (ProviderId) -> Unit,
     modifier: Modifier = Modifier,
     vm: SettingsViewModel = viewModel(),
     testVm: ConnectionTestViewModel = viewModel(),
@@ -287,7 +287,7 @@ private fun ProviderContent(
     vm: SettingsViewModel,
     testVm: ConnectionTestViewModel,
     provider: AiProvider,
-    onConfigureOther: (AiProvider) -> Unit,
+    onConfigureOther: (ProviderId) -> Unit,
     modifier: Modifier,
 ) {
     val acknowledged = provider in s.acknowledged
@@ -419,7 +419,7 @@ private fun ProviderContent(
         }
 
         // "Try Groq" only opens Groq's own setup. It does not change which provider answers chats.
-        ProviderTools(provider, hasKey && acknowledged, testVm) { onConfigureOther(AiProvider.GROQ) }
+        ProviderTools(provider, hasKey && acknowledged, testVm) { onConfigureOther(AiProvider.GROQ.toId()) }
 
         Text(
             "About your key: it is stored encrypted with Android's Keystore and is never written into the app " +
