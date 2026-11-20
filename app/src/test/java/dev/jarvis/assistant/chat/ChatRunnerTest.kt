@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -252,5 +253,56 @@ class ChatRunnerTest {
         withTimeout(5000) { while (r.send("two") != SendResult.ACCEPTED) delay(5) } // lock frees a moment after the UI state
         val finished = r.awaitState { !it.generating && it.conversation.messages.last().role == ChatRole.ASSISTANT }
         assertEquals(listOf("one", "two", "ok"), finished.conversation.messages.map { it.text })
+    }
+
+    // ------------------------------------------------------------------ the send gate and the "generating" state agree
+
+    /**
+     * Reacts in the very instant the screen is told the answer is finished ("not generating"), the way a fast tap or
+     * the keyboard's Send action could. The collector runs unconfined, so it runs inside the update that publishes that
+     * state: if the send gate is still held at that moment, the send is wrongly refused as BUSY.
+     */
+    private fun CoroutineScope.sendTheInstantItIsNotGenerating(r: ChatRunner, text: String, results: MutableList<SendResult>): Job {
+        val sawGenerating = java.util.concurrent.atomic.AtomicBoolean(false)
+        return launch(Dispatchers.Unconfined, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            r.state.collect { s ->
+                if (s.generating) sawGenerating.set(true)
+                else if (sawGenerating.compareAndSet(true, false) && results.isEmpty()) results += r.send(text)
+            }
+        }
+    }
+
+    @Test
+    fun aSendMadeTheInstantTheScreenSaysNotGeneratingIsAcceptedNotRefused() = runBlocking {
+        val llm = provider { n -> emit("reply $n") }
+        val r = runner(llm)
+        r.awaitIdle()
+        val results = java.util.concurrent.CopyOnWriteArrayList<SendResult>()
+        val watcher = sendTheInstantItIsNotGenerating(r, "two", results)
+        assertEquals(SendResult.ACCEPTED, r.send("one"))
+        val s = r.awaitState { !it.generating && it.conversation.messages.size == 4 }
+        watcher.cancel()
+        assertEquals("the screen said it was free, so the send must be accepted", listOf(SendResult.ACCEPTED), results.toList())
+        assertEquals(listOf("one", "reply 1", "two", "reply 2"), s.conversation.messages.map { it.text })
+    }
+
+    @Test
+    fun aSendAcceptedRightAfterTheLastAnswerIsStillShownAsGeneratingAndStillRefusesOthers() = runBlocking {
+        val second = CompletableDeferred<Unit>()
+        val llm = provider { n -> if (n == 2) second.await(); emit("reply $n") }
+        val r = runner(llm)
+        r.awaitIdle()
+        val results = java.util.concurrent.CopyOnWriteArrayList<SendResult>()
+        val watcher = sendTheInstantItIsNotGenerating(r, "two", results)
+        assertEquals(SendResult.ACCEPTED, r.send("one"))
+        withTimeout(5000) { while (results.isEmpty()) delay(5) }
+        assertEquals(listOf(SendResult.ACCEPTED), results.toList())
+        // The first answer's cleanup must not wipe out the state of the answer that has just begun.
+        assertTrue("the second answer is running, so the state says so", r.state.value.generating)
+        assertEquals("and a third message is refused while it runs", SendResult.BUSY, r.send("three"))
+        second.complete(Unit)
+        val s = r.awaitState { !it.generating && it.conversation.messages.size == 4 }
+        watcher.cancel()
+        assertEquals(listOf("one", "reply 1", "two", "reply 2"), s.conversation.messages.map { it.text })
     }
 }

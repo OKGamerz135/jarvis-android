@@ -126,6 +126,14 @@ class ChatRunner(
     private val memoryObserver: MemoryObserver = NoObserver,
 ) {
     private val gate = SendGate()
+
+    /**
+     * Makes "take the send gate and start a run" and "end a run: free the gate and say so" each one indivisible step.
+     * Without it a send could land between the two halves of the cleanup: refused as BUSY while the screen already
+     * said the answer was finished, or (if the halves were simply swapped) the old run's cleanup could wipe out the
+     * "generating" state of a run that had just started.
+     */
+    private val runLock = Any()
     private var job: Job? = null
     private var failoverCancel: CompletableDeferred<Unit>? = null
     private var stoppedDuringFailover = false
@@ -201,24 +209,28 @@ class ChatRunner(
     fun send(text: String): SendResult {
         val clean = text.trim()
         if (clean.isEmpty()) return SendResult.EMPTY
-        if (!gate.tryAcquire()) {
-            _state.update { it.copy(rejection = REJECTION) }
-            return SendResult.BUSY
+        synchronized(runLock) {
+            if (!gate.tryAcquire()) {
+                _state.update { it.copy(rejection = REJECTION) }
+                return SendResult.BUSY
+            }
+            begin()
+            launchGeneration(userText = clean)
         }
-        begin()
-        launchGeneration(userText = clean)
         return SendResult.ACCEPTED
     }
 
     /** Asks again for an answer to the last user message, without adding it a second time. */
     fun retry(): SendResult {
         if (!_state.value.conversation.awaitingReply) return SendResult.EMPTY
-        if (!gate.tryAcquire()) {
-            _state.update { it.copy(rejection = REJECTION) }
-            return SendResult.BUSY
+        synchronized(runLock) {
+            if (!gate.tryAcquire()) {
+                _state.update { it.copy(rejection = REJECTION) }
+                return SendResult.BUSY
+            }
+            begin()
+            launchGeneration(userText = null)
         }
-        begin()
-        launchGeneration(userText = null)
         return SendResult.ACCEPTED
     }
 
@@ -356,8 +368,12 @@ class ChatRunner(
         job = j
         // Runs however the job ends, even if it was cancelled before it started: the lock can never get stuck.
         j.invokeOnCompletion {
-            _state.update { it.copy(generating = false, stopping = false, streaming = null, note = null, failover = null) }
-            gate.release()
+            // Free the gate first and only then say "not generating", all inside the lock: whoever sees the screen go
+            // idle can send straight away (it is accepted), and no send can slip in between the two steps.
+            synchronized(runLock) {
+                gate.release()
+                _state.update { it.copy(generating = false, stopping = false, streaming = null, note = null, failover = null) }
+            }
             checkRecovery() // after the lock is free, so the question never appears mid-answer
         }
     }
