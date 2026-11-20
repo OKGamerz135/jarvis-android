@@ -6,6 +6,7 @@ import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmException
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.ai.ResetSource
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -83,8 +84,8 @@ class ChatRunnerFailoverTest {
         assertEquals(1, a.calls.get())
         assertEquals(1, b.calls.get())
         assertEquals(listOf("hello", "from groq"), s.conversation.messages.map { it.text })
-        assertEquals(R, s.temporaryProvider)
-        assertEquals(G, s.preferredProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
+        assertEquals(G.toId(), s.preferredProvider)
         assertTrue(ledger.isExhausted(G))
         assertNull(s.problem)
         assertEquals("hello", b.requests.single().messages.last().text)
@@ -205,7 +206,7 @@ class ChatRunnerFailoverTest {
         val s = r.idle()
         assertEquals(0, a.calls.get())
         assertEquals(1, b.calls.get())
-        assertEquals(R, s.temporaryProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
     }
 
     @Test fun nextMessageStaysOnTemporaryProvider() = runBlocking {
@@ -226,14 +227,14 @@ class ChatRunnerFailoverTest {
         assertNull(r.state.value.recoveryOffer) // still exhausted
         now += 3_700_000 // the reported reset passes
         r.checkRecovery()
-        r.until { it.recoveryOffer == G }
-        assertEquals(R, r.state.value.temporaryProvider) // not switched silently
+        r.until { it.recoveryOffer == G.toId() }
+        assertEquals(R.toId(), r.state.value.temporaryProvider) // not switched silently
         r.declineRecovery()
         assertNull(r.state.value.recoveryOffer)
         r.checkRecovery()
         delay(100)
         assertNull(r.state.value.recoveryOffer) // doesn't nag
-        assertEquals(R, r.state.value.temporaryProvider)
+        assertEquals(R.toId(), r.state.value.temporaryProvider)
         // Sending counts as staying; accepting later still works.
         r.acceptRecovery()
         r.until { it.temporaryProvider == null } // the switch back is saved first, then the state is cleared
@@ -268,7 +269,7 @@ class ChatRunnerFailoverTest {
         assertEquals(0, a.calls.get())
         assertEquals(1, b.calls.get())
         assertFalse(s.simulationArmed)
-        assertEquals(R, s.temporaryProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
     }
 
     @Test fun duplicateSendDuringCountdownIsRefused() = runBlocking {
@@ -299,8 +300,8 @@ class ChatRunnerFailoverTest {
         assertEquals("model-${R.name}", b.requests.single().model) // Groq's own model, not Gemini's
         assertEquals("KEY", b.requests.single().apiKey)
         val d = s.dispatch!!
-        assertEquals(G, d.requested)
-        assertEquals(R, d.actual)
+        assertEquals(G.toId(), d.requested)
+        assertEquals(R.toId(), d.actual)
         assertEquals("GroqFake", d.adapter)
         assertEquals(DispatchStage.FINISHED_OK, d.stage)
         assertFalse(d.mismatch)
@@ -320,10 +321,10 @@ class ChatRunnerFailoverTest {
         assertEquals(1, a.calls.get())
         assertEquals("model-${G.name}", a.requests.single().model)
         assertEquals(listOf("hello", "gemini answer"), s.conversation.messages.map { it.text })
-        assertEquals(G, s.temporaryProvider)
-        assertEquals(R, s.preferredProvider)
+        assertEquals(G.toId(), s.temporaryProvider)
+        assertEquals(R.toId(), s.preferredProvider)
         assertEquals("GeminiFake", s.dispatch!!.adapter)
-        assertEquals(R, s.dispatch!!.requested)
+        assertEquals(R.toId(), s.dispatch!!.requested)
     }
 
     @Test fun exhaustedAdapterIsNeverReusedForTheRetry() = runBlocking {
@@ -411,8 +412,8 @@ class ChatRunnerFailoverTest {
         assertFalse(first.mismatch)
         val second = r.until { it.dispatch?.adapter == "GroqFake" }.dispatch!!
         assertFalse(second.simulated)
-        assertEquals(G, second.requested)
-        assertEquals(R, r.idle().temporaryProvider)
+        assertEquals(G.toId(), second.requested)
+        assertEquals(R.toId(), r.idle().temporaryProvider)
     }
 
     // ------------------------------------------------------------------ trace content
@@ -424,10 +425,10 @@ class ChatRunnerFailoverTest {
         r.idle(); r.send("my private question")
         r.idle()
         val decision = traces.first { it.stage.startsWith("decision") }
-        assertEquals(G, decision.originalProvider)
+        assertEquals(G.toId(), decision.originalProvider)
         assertEquals("model-${G.name}", decision.originalModel)
         assertEquals("QuotaExhausted", decision.classification)
-        assertEquals(R, decision.fallbackProvider)
+        assertEquals(R.toId(), decision.fallbackProvider)
         assertEquals("model-${R.name}", decision.fallbackModel)
         val attempt = traces.first { it.stage == "attempt finished" }
         assertEquals("GroqFake", attempt.adapter)
@@ -458,8 +459,8 @@ class ChatRunnerFailoverTest {
         assertEquals(listOf("hello", "openrouter answer"), s.conversation.messages.map { it.text })
         assertEquals(O.label, s.conversation.messages.last().provider)
         assertEquals("model-${O.name}", c.requests.single().model)
-        assertEquals(O, s.temporaryProvider)
-        assertEquals(G, s.preferredProvider)
+        assertEquals(O.toId(), s.temporaryProvider)
+        assertEquals(G.toId(), s.preferredProvider)
         assertEquals("OpenRouterFake", s.dispatch!!.adapter)
         assertFalse(s.dispatch!!.mismatch)
     }
@@ -471,7 +472,7 @@ class ChatRunnerFailoverTest {
         val r = runner(FakeSource(mapOf(O to a, R to b), preferred = O))
         r.idle(); r.send("hello")
         val s = r.idle()
-        assertEquals(R, s.temporaryProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
         assertEquals(ResetSource.DOCUMENTED, ledger.record(O)!!.source)
     }
 
@@ -486,7 +487,7 @@ class ChatRunnerFailoverTest {
         val r = runner(FakeSource(mapOf(C to a, R to b), preferred = C))
         r.idle(); r.send("hello")
         val s = r.idle()
-        assertEquals(R, s.temporaryProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
         assertEquals(ResetSource.DOCUMENTED, ledger.record(C)!!.source)
         assertEquals(listOf("hello", "groq answer"), s.conversation.messages.map { it.text })
     }
@@ -498,7 +499,7 @@ class ChatRunnerFailoverTest {
         val r = runner(FakeSource(mapOf(G to a, C to c), preferred = G, disabled = setOf(R)))
         r.idle(); r.send("hello")
         val s = r.idle()
-        assertEquals(C, s.temporaryProvider)
+        assertEquals(C.toId(), s.temporaryProvider)
         assertEquals("CloudflareFake", s.dispatch!!.adapter)
         assertEquals(C.label, s.conversation.messages.last().provider)
 
@@ -536,7 +537,7 @@ class ChatRunnerFailoverTest {
         val r = runner(FakeSource(mapOf(Z to a, R to b), preferred = Z))
         r.idle(); r.send("hello")
         val s = r.idle()
-        assertEquals(R, s.temporaryProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
         assertEquals(ResetSource.UNKNOWN, ledger.record(Z)!!.source)
     }
 
@@ -547,7 +548,7 @@ class ChatRunnerFailoverTest {
         val r = runner(FakeSource(mapOf(R to a, Z to c), preferred = R, disabled = setOf(G)))
         r.idle(); r.send("hello")
         val s = r.idle()
-        assertEquals(Z, s.temporaryProvider)
+        assertEquals(Z.toId(), s.temporaryProvider)
         assertEquals("ZaiFake", s.dispatch!!.adapter)
         assertEquals(1, c.calls.get())
     }

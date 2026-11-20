@@ -2,6 +2,7 @@ package dev.jarvis.assistant.chat
 
 import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.ResetSource
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -13,7 +14,7 @@ class FailoverPolicyTest {
     private val quota = LlmError.QuotaExhausted(null, "PerDay", ResetSource.UNKNOWN)
 
     private fun cand(p: AiProvider, enabled: Boolean = true, key: Boolean = true, ack: Boolean = true, ex: Boolean = false) =
-        Candidate(p, "m", enabled, key, ack, ex)
+        Candidate(p.toId(), "m", enabled, key, ack, ex)
 
     private fun ctx(
         current: AiProvider = G,
@@ -23,12 +24,12 @@ class FailoverPolicyTest {
         rate: Boolean = false,
         net: Boolean = false,
         tried: Set<AiProvider> = setOf(current),
-    ) = FailoverContext(current, on, cands, partial, rate, net, tried)
+    ) = FailoverContext(current.toId(), on, cands, partial, rate, net, tried.map { it.toId() }.toSet())
 
     @Test fun quotaSwitchesToNextEligible() {
         val d = FailoverPolicy.decide(quota, ctx())
         assertTrue(d is Decision.Switch)
-        assertEquals(R, (d as Decision.Switch).to.provider)
+        assertEquals(R.toId(), (d as Decision.Switch).to.provider)
     }
 
     @Test fun failoverOffNeverSwitches() {

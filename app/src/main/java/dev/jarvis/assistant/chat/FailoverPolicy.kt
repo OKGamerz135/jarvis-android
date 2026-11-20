@@ -1,11 +1,11 @@
 package dev.jarvis.assistant.chat
 
 import dev.jarvis.assistant.ai.LlmError
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.providers.ProviderId
 
 /** One provider as a possible failover target. */
 data class Candidate(
-    val provider: AiProvider,
+    val provider: ProviderId,
     val model: String,
     val enabled: Boolean,
     val hasKey: Boolean,
@@ -25,7 +25,7 @@ data class Candidate(
 }
 
 data class FailoverContext(
-    val current: AiProvider,
+    val current: ProviderId,
     val failoverEnabled: Boolean,
     /** All providers in the user's priority order. */
     val candidates: List<Candidate>,
@@ -34,7 +34,7 @@ data class FailoverContext(
     val alreadyWaitedForRateLimit: Boolean,
     val alreadyWaitedForNetwork: Boolean,
     /** Providers already used for this message, so we never ping-pong. */
-    val alreadyTried: Set<AiProvider>,
+    val alreadyTried: Set<ProviderId>,
 )
 
 sealed interface Decision {
@@ -46,7 +46,7 @@ sealed interface Decision {
     data object FailoverOff : Decision
 
     /** Quota is used up and nothing else is usable. [reasons] explain each other provider. */
-    data class NoAlternative(val reasons: List<Pair<AiProvider, String>>) : Decision
+    data class NoAlternative(val reasons: List<Pair<ProviderId, String>>) : Decision
 
     data object ShowError : Decision
 }

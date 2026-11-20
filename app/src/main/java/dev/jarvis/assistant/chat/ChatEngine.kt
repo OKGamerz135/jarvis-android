@@ -6,7 +6,7 @@ import dev.jarvis.assistant.ai.ChatRole
 import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmException
 import dev.jarvis.assistant.ai.LlmProvider
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.providers.ProviderId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -16,16 +16,16 @@ import java.util.UUID
 
 /** Everything needed to make one request, already checked for key and consent. */
 class ChatTarget(
-    val provider: AiProvider,
+    val provider: ProviderId,
+    /** The name to show for [provider] (from its descriptor). Display only. */
+    val providerLabel: String,
     val historyBudgetChars: Int,
     val model: String,
     val apiKey: String,
     val systemPrompt: String,
     /** Restates the personality setting on the newest user message of the request (not saved). Empty = none. */
     val styleReminder: String = "",
-) {
-    val providerLabel: String get() = provider.label
-}
+)
 
 sealed interface GenResult {
     val conversation: Conversation

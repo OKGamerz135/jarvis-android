@@ -3,6 +3,8 @@ package dev.jarvis.assistant.chat
 import dev.jarvis.assistant.ai.CallOptions
 import dev.jarvis.assistant.ai.ChatRequest
 import dev.jarvis.assistant.ai.LlmProvider
+import dev.jarvis.assistant.providers.toAiProviderOrNull
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +44,7 @@ class ChatMemoryTest {
         val engine = ChatEngine(storage, memory = MemoryContext { block })
         for (p in AiProvider.entries) {
             val conv = engine.addUserMessage(Conversation.empty("c-${p.name}", 0), "What colour should my room be?")
-            val target = ChatTarget(p, 10_000, "m", "KEY", "SYSTEM")
+            val target = chatTarget(p, 10_000, "m", "KEY", "SYSTEM")
             engine.generate(conv, target, llm, CallOptions()) { }
             val sent = requests.last()
             assertTrue(p.name, sent.systemPrompt.startsWith("SYSTEM"))
@@ -58,14 +60,14 @@ class ChatMemoryTest {
     @Test fun noMemoryLeavesThePromptExactlyAsBefore() = runBlocking {
         val engine = ChatEngine(storage, memory = MemoryContext { "" })
         val conv = engine.addUserMessage(Conversation.empty("c1", 0), "hello there friend")
-        engine.generate(conv, ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions()) { }
+        engine.generate(conv, chatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions()) { }
         assertEquals("SYSTEM", requests.last().systemPrompt)
     }
 
     @Test fun chatStillAnswersWhenMemoryRetrievalThrows() = runBlocking {
         val engine = ChatEngine(storage, memory = MemoryContext { error("database exploded") })
         val conv = engine.addUserMessage(Conversation.empty("c1", 0), "hello there friend")
-        val r = engine.generate(conv, ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions()) { }
+        val r = engine.generate(conv, chatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions()) { }
         assertTrue(r is GenResult.Success)
         assertEquals("SYSTEM", requests.last().systemPrompt)
     }
@@ -74,18 +76,19 @@ class ChatMemoryTest {
         var seen: List<String> = emptyList()
         val engine = ChatEngine(storage, memory = MemoryContext { seen = it; "" })
         val conv = engine.addUserMessage(Conversation.empty("c1", 0), "what colour is best")
-        engine.generate(conv, ChatTarget(AiProvider.GEMINI, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions()) { }
+        engine.generate(conv, chatTarget(AiProvider.GEMINI, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions()) { }
         assertTrue(seen.any { it.contains("colour") })
     }
 
     @Test fun chatContinuesWhenTheMemoryObserverFails() = runBlocking {
         val seen = CopyOnWriteArrayList<String>()
         val source = object : ProviderSource {
-            override suspend fun resolve(provider: AiProvider?) =
-                Resolved.Ready(ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
+            override fun labelOf(id: dev.jarvis.assistant.providers.ProviderId) = builtInLabelOf(id)
+            override suspend fun resolve(provider: dev.jarvis.assistant.providers.ProviderId?) =
+                Resolved.Ready(chatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
             override suspend fun snapshot() = ProviderSnapshot(
-                AiProvider.GROQ, false,
-                AiProvider.entries.map { Candidate(it, "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
+                AiProvider.GROQ.toId(), false,
+                AiProvider.entries.map { Candidate(it.toId(), "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
             )
         }
         val runner = ChatRunner(
@@ -104,7 +107,7 @@ class ChatMemoryTest {
         val engine = ChatEngine(storage)
         for (p in AiProvider.entries) {
             val conv = engine.addUserMessage(Conversation.empty("n-${p.name}", 0), "Save this in memory that I have an iQOO 16")
-            engine.generate(conv, ChatTarget(p, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions(), memoryNote = "Memory status: SAVED") { }
+            engine.generate(conv, chatTarget(p, 10_000, "m", "KEY", "SYSTEM"), llm, CallOptions(), memoryNote = "Memory status: SAVED") { }
             assertTrue(p.name, requests.last().systemPrompt.endsWith("Memory status: SAVED"))
             assertFalse(p.name, storage.load("n-${p.name}")!!.messages.any { it.text.contains("Memory status") })
         }
@@ -112,11 +115,12 @@ class ChatMemoryTest {
 
     @Test fun theRunnerWaitsForMemoryAndGivesTheReplyItsTrueResult() = runBlocking {
         val source = object : ProviderSource {
-            override suspend fun resolve(provider: AiProvider?) =
-                Resolved.Ready(ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
+            override fun labelOf(id: dev.jarvis.assistant.providers.ProviderId) = builtInLabelOf(id)
+            override suspend fun resolve(provider: dev.jarvis.assistant.providers.ProviderId?) =
+                Resolved.Ready(chatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
             override suspend fun snapshot() = ProviderSnapshot(
-                AiProvider.GROQ, false,
-                AiProvider.entries.map { Candidate(it, "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
+                AiProvider.GROQ.toId(), false,
+                AiProvider.entries.map { Candidate(it.toId(), "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
             )
         }
         val runner = ChatRunner(
@@ -130,11 +134,12 @@ class ChatMemoryTest {
 
     @Test fun aHungMemoryNeverBlocksTheReplyAndIsNotClaimedAsSaved() = runBlocking {
         val source = object : ProviderSource {
-            override suspend fun resolve(provider: AiProvider?) =
-                Resolved.Ready(ChatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
+            override fun labelOf(id: dev.jarvis.assistant.providers.ProviderId) = builtInLabelOf(id)
+            override suspend fun resolve(provider: dev.jarvis.assistant.providers.ProviderId?) =
+                Resolved.Ready(chatTarget(AiProvider.GROQ, 10_000, "m", "KEY", "SYSTEM"), llm)
             override suspend fun snapshot() = ProviderSnapshot(
-                AiProvider.GROQ, false,
-                AiProvider.entries.map { Candidate(it, "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
+                AiProvider.GROQ.toId(), false,
+                AiProvider.entries.map { Candidate(it.toId(), "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
             )
         }
         val runner = ChatRunner(

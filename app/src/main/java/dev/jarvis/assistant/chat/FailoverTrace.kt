@@ -3,7 +3,7 @@ package dev.jarvis.assistant.chat
 import dev.jarvis.assistant.ai.CallOptions
 import dev.jarvis.assistant.ai.ChatRequest
 import dev.jarvis.assistant.ai.LlmProvider
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.providers.ProviderId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -15,15 +15,17 @@ enum class DispatchStage { DISPATCHED, STREAMING, FINISHED_OK, FINISHED_FAILED }
  * means "confirmed", never "planned". [requested] is the provider this message started with.
  */
 data class DispatchInfo(
-    val requested: AiProvider,
-    val actual: AiProvider,
+    val requested: ProviderId,
+    /** The name shown for [requested] (from its descriptor). */
+    val requestedLabel: String,
+    val actual: ProviderId,
     val adapter: String,
     val model: String,
     val stage: DispatchStage,
     val simulated: Boolean,
 ) {
     /** For example "Google Gemini -> GroqProvider -> openai/gpt-oss-120b". */
-    val line: String get() = "${requested.label} → $adapter → $model"
+    val line: String get() = "$requestedLabel → $adapter → $model"
 
     val stageText: String
         get() = when (stage) {
@@ -34,15 +36,17 @@ data class DispatchInfo(
         }
 
     /** True when the adapter that ran doesn't belong to the provider we meant to use (and isn't the labelled simulation). */
-    val mismatch: Boolean get() = !simulated && !adapter.contains(actual.name, ignoreCase = true)
+    val mismatch: Boolean get() = !simulated && !adapter.contains(actual.value, ignoreCase = true)
 }
 
 /** One line of the failover trace. Never carries keys, headers or message text. */
 data class TraceEvent(
-    val originalProvider: AiProvider?,
+    val originalProvider: ProviderId?,
+    val originalLabel: String?,
     val originalModel: String?,
     val classification: String?,
-    val fallbackProvider: AiProvider?,
+    val fallbackProvider: ProviderId?,
+    val fallbackLabel: String?,
     val fallbackModel: String?,
     val adapter: String?,
     val stage: String,
@@ -101,19 +105,19 @@ class DiagnosticsTraceSink(
         val real = if (event.adapter != null && event.fallbackProvider != null) {
             entries().lastOrNull {
                 it.kind != dev.jarvis.assistant.diag.CallKind.FAILOVER &&
-                    it.provider == event.fallbackProvider.label && it.timeMillis >= event.dispatchedAtMillis
+                    it.provider == event.fallbackLabel && it.timeMillis >= event.dispatchedAtMillis
             }
         } else {
             null
         }
-        val from = if (event.originalProvider != null) "${event.originalProvider.label} (${event.originalModel})" else "none"
+        val from = if (event.originalProvider != null) "${event.originalLabel ?: "unknown provider"} (${event.originalModel})" else "none"
         val message = "from=$from; adapter=${event.adapter ?: "n/a"}; streamStarted=${event.streamStarted}; " +
             "responseReceived=${event.responseReceived}; result=${event.result}"
         sink.record(
             dev.jarvis.assistant.diag.DiagnosticEntry(
                 timeMillis = clock(),
                 kind = dev.jarvis.assistant.diag.CallKind.FAILOVER,
-                provider = event.fallbackProvider?.label ?: "",
+                provider = event.fallbackLabel ?: "",
                 model = event.fallbackModel ?: "",
                 method = event.stage,
                 endpoint = real?.let { hostOf(it.endpoint) } ?: "",

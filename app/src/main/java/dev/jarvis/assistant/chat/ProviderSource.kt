@@ -6,14 +6,14 @@ import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmException
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.ai.ResetSource
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.providers.ProviderId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.time.Instant
 
 /** Everything the chat needs to know about the user's providers right now. */
 data class ProviderSnapshot(
-    val preferred: AiProvider,
+    val preferred: ProviderId,
     val failoverEnabled: Boolean,
     /** Every provider, in the user's priority order. */
     val candidates: List<Candidate>,
@@ -21,13 +21,23 @@ data class ProviderSnapshot(
 
 /** Supplies ready-to-use targets and the current provider picture. The Android version reads settings and keys. */
 interface ProviderSource {
-    /** Checks consent and key for [provider] (null means the preferred one) and builds the request target. */
-    suspend fun resolve(provider: AiProvider?): Resolved
+    /**
+     * Checks consent and key for [provider] (null means the preferred one) and builds the request target. A provider
+     * that is unknown, or known but not able to run yet, is answered with [Resolved.Stop]: nothing is sent and no
+     * other provider is used in its place.
+     */
+    suspend fun resolve(provider: ProviderId?): Resolved
 
     suspend fun snapshot(): ProviderSnapshot
 
     /** Makes [provider] the preferred (chat) provider. Used when failover switches, and when the user picks one. */
-    suspend fun setPreferred(provider: AiProvider) {}
+    suspend fun setPreferred(provider: ProviderId) {}
+
+    /**
+     * The name to show for [id]. Only for display: it never decides which provider is used. An id that is not known
+     * gets a generic name, never another provider's.
+     */
+    fun labelOf(id: ProviderId): String
 }
 
 /** Waits until the phone has a network again. */

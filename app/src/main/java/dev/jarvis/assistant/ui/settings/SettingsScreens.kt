@@ -102,7 +102,7 @@ fun SettingsHubScreen(
             // The same status model the provider tabs use: configuration and test result are stated separately.
             subtitle = if (s == null) "" else ProviderStatusModel.hubSummary(
                 ProviderStatusModel.all(
-                    vm.registry.all(), keyStates, s.acknowledged.map { it.toId() }.toSet(), testStates, s.provider.toId(), chat.preferredProvider?.toId(),
+                    vm.registry.all(), keyStates, s.acknowledged.map { it.toId() }.toSet(), testStates, s.provider.toId(), chat.preferredProvider,
                 ).values,
                 s.failoverEnabled,
             ),

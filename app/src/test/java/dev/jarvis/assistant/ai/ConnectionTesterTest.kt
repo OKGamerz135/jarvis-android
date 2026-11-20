@@ -1,13 +1,16 @@
 package dev.jarvis.assistant.ai
 
 import dev.jarvis.assistant.chat.ChatProblem
-import dev.jarvis.assistant.chat.ChatTarget
+import dev.jarvis.assistant.chat.chatTarget
 import dev.jarvis.assistant.chat.ProviderSnapshot
 import dev.jarvis.assistant.chat.ProviderSource
 import dev.jarvis.assistant.chat.Resolved
 import dev.jarvis.assistant.diag.CallKind
 import dev.jarvis.assistant.diag.DiagnosticEntry
+import dev.jarvis.assistant.chat.builtInLabelOf
+import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.toAiProviderOrNull
 import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CompletableDeferred
@@ -70,23 +73,25 @@ class ConnectionTesterTest {
     /** Hands out targets built from per-provider settings. [preferred] is only here to prove it is never consulted. */
     private class Source(val adapters: Map<AiProvider, Adapter>) : ProviderSource {
         @Volatile var preferred: AiProvider = AiProvider.GEMINI
-        val resolved = CopyOnWriteArrayList<AiProvider?>()
+        val resolved = CopyOnWriteArrayList<ProviderId?>()
         var withoutKey: Set<AiProvider> = emptySet()
         var models: MutableMap<AiProvider, String> = AiProvider.entries.associateWith { "model-${it.name}" }.toMutableMap()
         var lie: AiProvider? = null // if set, answers for this provider whatever was asked (a buggy resolver)
 
-        override suspend fun resolve(provider: AiProvider?): Resolved {
+        override fun labelOf(id: ProviderId) = builtInLabelOf(id)
+
+        override suspend fun resolve(provider: ProviderId?): Resolved {
             resolved += provider
-            val p = provider ?: preferred
+            val p = provider?.toAiProviderOrNull() ?: preferred
             if (p in withoutKey) return Resolved.Stop(ChatProblem("${p.label} is not configured", null, true))
             val answerFor = lie ?: p
             return Resolved.Ready(
-                ChatTarget(answerFor, 1000, models.getValue(answerFor), "KEY-${answerFor.name}", "system-for-${answerFor.name}"),
+                chatTarget(answerFor, 1000, models.getValue(answerFor), "KEY-${answerFor.name}", "system-for-${answerFor.name}"),
                 adapters.getValue(answerFor),
             )
         }
 
-        override suspend fun snapshot() = ProviderSnapshot(preferred, true, emptyList())
+        override suspend fun snapshot() = ProviderSnapshot(preferred.toId(), true, emptyList())
     }
 
     private val adapters = AiProvider.entries.associateWith { Adapter(it) }
@@ -113,7 +118,7 @@ class ConnectionTesterTest {
         source.preferred = C
         val t = tester()
         assertTrue(t.checkAvailability(Q.toId())); t.settled()
-        assertEquals(listOf<AiProvider?>(Q), source.resolved)
+        assertEquals(listOf<ProviderId?>(Q.toId()), source.resolved)
         assertEquals(listOf("KEY-GROQ" to "model-GROQ"), adapters.getValue(Q).checks)
         assertTrue(adapters.getValue(C).checks.isEmpty())
         assertTrue(adapters.getValue(G).checks.isEmpty())
@@ -232,7 +237,7 @@ class ConnectionTesterTest {
         assertFalse("another provider", t.runTest(G.toId(), "x"))
         assertFalse("same provider, other check", t.runDiagnostics(Q.toId()))
         assertFalse("same check again", t.checkAvailability(Q.toId()))
-        assertEquals("refused calls must not even resolve a provider", listOf<AiProvider?>(Q), source.resolved)
+        assertEquals("refused calls must not even resolve a provider", listOf<ProviderId?>(Q.toId()), source.resolved)
         assertEquals(ProviderTestState(), t.stateOf(G.toId()))
 
         gate.complete(Unit); t.settled()

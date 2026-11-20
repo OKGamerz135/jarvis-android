@@ -3,6 +3,7 @@ package dev.jarvis.assistant.chat
 import dev.jarvis.assistant.diag.CallKind
 import dev.jarvis.assistant.diag.DiagnosticEntry
 import dev.jarvis.assistant.diag.DiagnosticsSink
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,7 +34,7 @@ class FailoverTraceTest {
         val sink = DiagnosticsTraceSink(object : DiagnosticsSink { override fun record(entry: DiagnosticEntry) { written += entry } }, { listOf(older, real) }, { 2000 })
         sink.record(
             TraceEvent(
-                AiProvider.GEMINI, "gm", "QuotaExhausted", AiProvider.GROQ, "m", "GroqProvider", "attempt finished",
+                AiProvider.GEMINI.toId(), AiProvider.GEMINI.label, "gm", "QuotaExhausted", AiProvider.GROQ.toId(), AiProvider.GROQ.label, "m", "GroqProvider", "attempt finished",
                 streamStarted = true, responseReceived = true, dispatchedAtMillis = 1000, result = "success",
             ),
         )
@@ -48,7 +49,7 @@ class FailoverTraceTest {
     }
 
     @Test fun dispatchMismatchIsFlaggedButSimulationIsNot() {
-        val ok = DispatchInfo(AiProvider.GEMINI, AiProvider.GROQ, "GroqProvider", "m", DispatchStage.STREAMING, false)
+        val ok = DispatchInfo(AiProvider.GEMINI.toId(), AiProvider.GEMINI.label, AiProvider.GROQ.toId(), "GroqProvider", "m", DispatchStage.STREAMING, false)
         assertFalse(ok.mismatch)
         assertTrue(ok.copy(adapter = "GeminiProvider").mismatch)
         assertFalse(ok.copy(adapter = "SimulatedQuotaProvider", simulated = true).mismatch)

@@ -4,6 +4,8 @@ import dev.jarvis.assistant.ai.CallOptions
 import dev.jarvis.assistant.ai.ChatRequest
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.ai.PromptBuilder
+import dev.jarvis.assistant.providers.toAiProviderOrNull
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.JarvisSettings
 import kotlinx.coroutines.CoroutineScope
@@ -46,14 +48,16 @@ class ProfanityNextMessageTest {
     }
 
     private inner class LiveSettingsSource : ProviderSource {
-        override suspend fun resolve(provider: AiProvider?): Resolved {
-            val p = provider ?: AiProvider.GROQ
-            return Resolved.Ready(ChatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(settings), PromptBuilder.styleReminder(settings)), llm)
+        override fun labelOf(id: dev.jarvis.assistant.providers.ProviderId) = builtInLabelOf(id)
+
+        override suspend fun resolve(provider: dev.jarvis.assistant.providers.ProviderId?): Resolved {
+            val p = provider?.toAiProviderOrNull() ?: AiProvider.GROQ
+            return Resolved.Ready(chatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(settings), PromptBuilder.styleReminder(settings)), llm)
         }
 
         override suspend fun snapshot() = ProviderSnapshot(
-            AiProvider.GROQ, false,
-            AiProvider.entries.map { Candidate(it, "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
+            AiProvider.GROQ.toId(), false,
+            AiProvider.entries.map { Candidate(it.toId(), "m", it == AiProvider.GROQ, it == AiProvider.GROQ, true, false) },
         )
     }
 
@@ -140,7 +144,7 @@ class ProfanityNextMessageTest {
             val rec = object : LlmProvider {
                 override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow { seen[p] = request; emit("ok") }
             }
-            val target = ChatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(s), PromptBuilder.styleReminder(s))
+            val target = chatTarget(p, 10_000, "m", "KEY", PromptBuilder.build(s), PromptBuilder.styleReminder(s))
             engine.generate(conv, target, rec, CallOptions()) {}
         }
         assertEquals(AiProvider.entries.size, seen.size)

@@ -118,7 +118,7 @@ fun ChatScreen(
                     Text(f.announcement, style = MaterialTheme.typography.titleSmall)
                     Text(f.disclosure, style = MaterialTheme.typography.bodySmall)
                     Text(
-                        "${f.from.label}: ${f.resetNote}.",
+                        "${f.fromLabel}: ${f.resetNote}.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -150,8 +150,8 @@ fun ChatScreen(
             ) {
                 val offer = ui.recoveryOffer
                 Text(
-                    if (offer != null) "${offer.label} should be available again. Switch back to it?"
-                    else "Temporarily using ${temp.label} (${ui.preferredProvider?.label ?: "your preferred provider"} used up its quota).",
+                    if (offer != null) "${vm.labelOf(offer)} should be available again. Switch back to it?"
+                    else "Temporarily using ${vm.labelOf(temp)} (${ui.preferredProvider?.let { vm.labelOf(it) } ?: "your preferred provider"} used up its quota).",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (offer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),

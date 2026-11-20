@@ -12,7 +12,7 @@ import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.KeyChanges
-import dev.jarvis.assistant.settings.SecureKeyStore
+import dev.jarvis.assistant.settings.AndroidKeyBook
 import dev.jarvis.assistant.settings.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -31,13 +31,14 @@ import kotlinx.coroutines.withContext
 class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SettingsRepository(app)
     private val registry = ProviderRegistry.withBuiltIns()
-    private val keys = SecureKeyStore(app)
+    private val keys = AndroidKeyBook.create(app, registry)
 
     private val tester = ConnectionTester(
         scope = viewModelScope,
         source = SettingsProviderSource(
+            registry = registry,
             settings = { repo.settings.first() },
-            readKey = { name -> withContext(Dispatchers.IO) { keys.read(name) } },
+            readKey = { id -> withContext(Dispatchers.IO) { keys.read(id) } },
             hasKey = keys::has,
             llmFor = Providers::forProvider,
             ledger = QuotaLedgers.get(app),

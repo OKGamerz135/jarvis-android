@@ -11,8 +11,10 @@ import dev.jarvis.assistant.ai.ResetSource
 import dev.jarvis.assistant.ai.ChatRole
 import dev.jarvis.assistant.memory.ChatTurn
 import dev.jarvis.assistant.memory.MemoryStatusNote
+import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.QuotaLedger
-import dev.jarvis.assistant.settings.AiProvider
+import dev.jarvis.assistant.providers.QuotaRecord
+import dev.jarvis.assistant.providers.toAiProviderOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -38,17 +40,20 @@ data class ChatProblem(val message: String, val details: String?, val needsSetup
 
 /** The five-second "switching provider" announcement. Shown with a Cancel button. */
 data class FailoverOffer(
-    val from: AiProvider,
-    val to: AiProvider,
+    val from: ProviderId,
+    /** The names shown for [from] and [to] (from their descriptors). */
+    val fromLabel: String,
+    val to: ProviderId,
+    val toLabel: String,
     val toModel: String,
     val secondsLeft: Int,
     /** When the provider we're leaving should be back, in plain words, or that it's unknown. */
     val resetNote: String,
 ) {
     val announcement: String
-        get() = "Your current AI provider has exhausted its available quota. Switching to ${to.label} in $secondsLeft seconds."
+        get() = "Your current AI provider has exhausted its available quota. Switching to $toLabel in $secondsLeft seconds."
     val disclosure: String
-        get() = "This conversation so far, and any saved memories that are relevant to it, will be sent to ${to.label} (model $toModel). Your API keys never leave their own provider."
+        get() = "This conversation so far, and any saved memories that are relevant to it, will be sent to $toLabel (model $toModel). Your API keys never leave their own provider."
 }
 
 data class ChatUiState(
@@ -68,11 +73,11 @@ data class ChatUiState(
     /** Non-null during the countdown before switching provider. */
     val failover: FailoverOffer? = null,
     /** The provider an automatic switch put in use (it is also the saved preferred provider then). Null = no switch is active. */
-    val temporaryProvider: AiProvider? = null,
+    val temporaryProvider: ProviderId? = null,
     /** The provider that was preferred before the automatic switch; the "switch back?" question is about this one. */
-    val preferredProvider: AiProvider? = null,
+    val preferredProvider: ProviderId? = null,
     /** Set when the preferred provider is available again; the screen asks whether to switch back. */
-    val recoveryOffer: AiProvider? = null,
+    val recoveryOffer: ProviderId? = null,
     /** Set when the user's choice of preferred provider (or "switch back") could not be saved. Nothing was changed. */
     val preferenceError: String? = null,
     /** True after "simulate quota exhaustion" was armed for the next message. */
@@ -124,8 +129,8 @@ class ChatRunner(
     private var job: Job? = null
     private var failoverCancel: CompletableDeferred<Unit>? = null
     private var stoppedDuringFailover = false
-    private var failingProvider: AiProvider? = null
-    private var recoveryDeclinedFor: AiProvider? = null
+    private var failingProvider: ProviderId? = null
+    private var recoveryDeclinedFor: ProviderId? = null
     private var recoveryTimer: Job? = null
 
     /**
@@ -263,7 +268,7 @@ class ChatRunner(
         pendingPreference = scope.launch {
             if (back != null) {
                 if (!saveAsPreferred(back)) { reportPreferenceNotSaved(back); return@launch }
-                ledger.clear(back) // only once the switch back really happened
+                quotaClear(back) // only once the switch back really happened
             }
             endFailoverEpisode()
         }
@@ -273,14 +278,14 @@ class ChatRunner(
      * The user picked [provider] as the one that answers chats. That ends any automatic-switch episode: the saved
      * preference and what the chat screen says always agree, and the next message goes to [provider].
      */
-    fun choosePreferred(provider: AiProvider) {
+    fun choosePreferred(provider: ProviderId) {
         pendingPreference = scope.launch {
             if (!saveAsPreferred(provider)) { reportPreferenceNotSaved(provider); return@launch }
             endFailoverEpisode()
         }
     }
 
-    private suspend fun saveAsPreferred(provider: AiProvider): Boolean =
+    private suspend fun saveAsPreferred(provider: ProviderId): Boolean =
         try {
             source.setPreferred(provider)
             true
@@ -291,14 +296,21 @@ class ChatRunner(
         }
 
     /** The save failed, so nothing changed: the saved preference and the state still agree. Say so instead of staying quiet. */
-    private fun reportPreferenceNotSaved(wanted: AiProvider) {
+    private fun reportPreferenceNotSaved(wanted: ProviderId) {
         _state.update {
             it.copy(
-                preferenceError = "Couldn't save ${wanted.label} as your preferred provider, so nothing was changed. " +
+                preferenceError = "Couldn't save ${source.labelOf(wanted)} as your preferred provider, so nothing was changed. " +
                     "Chats still use the provider that was saved before. Try again.",
             )
         }
     }
+
+    // The quota ledger still knows only the built-in providers. A provider that is not one has no ledger entry: nothing
+    // is read, written or cleared for it, and it is never mapped to some built-in provider's entry.
+    private fun quotaRecord(id: ProviderId): QuotaRecord? = id.toAiProviderOrNull()?.let { ledger.record(it) }
+    private fun quotaExhausted(id: ProviderId): Boolean = id.toAiProviderOrNull()?.let { ledger.isExhausted(it) } ?: false
+    private fun quotaMark(id: ProviderId, error: LlmError.QuotaExhausted) { id.toAiProviderOrNull()?.let { ledger.markExhausted(it, error) } }
+    private fun quotaClear(id: ProviderId) { id.toAiProviderOrNull()?.let { ledger.clear(it) } }
 
     private fun endFailoverEpisode() {
         recoveryTimer?.cancel()
@@ -322,14 +334,14 @@ class ChatRunner(
             val s = _state.value
             val preferred = s.preferredProvider ?: return@launch
             if (s.temporaryProvider == null || gate.isBusy || s.generating) return@launch
-            if (ledger.isExhausted(preferred) || recoveryDeclinedFor == preferred) return@launch
+            if (quotaExhausted(preferred) || recoveryDeclinedFor == preferred) return@launch
             _state.update { it.copy(recoveryOffer = preferred) }
         }
     }
 
-    private fun scheduleRecoveryCheck(provider: AiProvider) {
+    private fun scheduleRecoveryCheck(provider: ProviderId) {
         recoveryTimer?.cancel()
-        val until = ledger.record(provider)?.exhaustedUntil ?: return // unknown reset: nothing to wait for
+        val until = quotaRecord(provider)?.exhaustedUntil ?: return // unknown reset: nothing to wait for
         val wait = (until - clock()).coerceAtLeast(0) + 500
         recoveryTimer = scope.launch {
             delay(wait)
@@ -391,7 +403,7 @@ class ChatRunner(
                 it.copy(
                     conversation = saved ?: it.conversation,
                     problem = ChatProblem(
-                        "Switch cancelled. I stayed with ${from?.label ?: "the current provider"}, so I can't answer " +
+                        "Switch cancelled. I stayed with ${from?.let { source.labelOf(it) } ?: "the current provider"}, so I can't answer " +
                             "until you pick another provider or its quota resets.",
                         null,
                         needsSetup = true,
@@ -422,12 +434,12 @@ class ChatRunner(
         // earlier automatic switch put in use (the user chose another one since), that switch episode is over.
         val temp = _state.value.temporaryProvider
         if (temp != null && source.snapshot().preferred != temp) endFailoverEpisode()
-        var provider: AiProvider? = null
-        val tried = LinkedHashSet<AiProvider>()
+        var provider: ProviderId? = null
+        val tried = LinkedHashSet<ProviderId>()
         var waitedRate = false
         var waitedNet = false
-        var requestedFirst: AiProvider? = null
-        var switchedFrom: Triple<AiProvider, String, String?>? = null // provider, model, classification
+        var requestedFirst: ProviderId? = null
+        var switchedFrom: Triple<ProviderId, String, String?>? = null // provider, model, classification
 
         while (true) {
             val ready = when (val r = source.resolve(provider)) {
@@ -443,8 +455,8 @@ class ChatRunner(
             val snap = source.snapshot()
 
             // If we already know this provider is used up, say so now instead of spending a request to find out.
-            val known = ledger.record(current)
-            val knownExhausted = snap.failoverEnabled && known != null && ledger.isExhausted(current)
+            val known = quotaRecord(current)
+            val knownExhausted = snap.failoverEnabled && known != null && quotaExhausted(current)
             val failure: GenResult.Failure = if (knownExhausted) {
                 GenResult.Failure(
                     _state.value.conversation,
@@ -461,7 +473,7 @@ class ChatRunner(
                 }
                 when (val result = generate(ready, llm, requestedFirst ?: current, simulated, switchedFrom)) {
                     is GenResult.Success -> {
-                        ledger.clear(current) // it just worked, so whatever we remembered is out of date
+                        quotaClear(current) // it just worked, so whatever we remembered is out of date
                         _state.update { it.copy(conversation = result.conversation) }
                         return
                     }
@@ -472,7 +484,7 @@ class ChatRunner(
             _state.update { it.copy(conversation = failure.conversation) }
             val error = failure.error
             if (error is LlmError.QuotaExhausted && !knownExhausted) {
-                ledger.markExhausted(current, error)
+                quotaMark(current, error)
             }
 
             val ctx = FailoverContext(
@@ -489,9 +501,9 @@ class ChatRunner(
                     switchedFrom = Triple(current, ready.target.model, error?.javaClass?.simpleName)
                     trace.record(
                         TraceEvent(
-                            originalProvider = current, originalModel = ready.target.model,
+                            originalProvider = current, originalLabel = ready.target.providerLabel, originalModel = ready.target.model,
                             classification = error?.javaClass?.simpleName,
-                            fallbackProvider = d.to.provider, fallbackModel = d.to.model,
+                            fallbackProvider = d.to.provider, fallbackLabel = source.labelOf(d.to.provider), fallbackModel = d.to.model,
                             adapter = null, stage = "decision: switch after countdown",
                             streamStarted = false, responseReceived = false,
                             dispatchedAtMillis = clock(), result = "pending",
@@ -537,7 +549,7 @@ class ChatRunner(
                 Decision.FailoverOff -> {
                     _state.update {
                         it.copy(problem = ChatProblem(
-                            ErrorMessages.of(error!!) + " Automatic provider failover is off, so I stayed with ${current.label}.",
+                            ErrorMessages.of(error!!) + " Automatic provider failover is off, so I stayed with ${source.labelOf(current)}.",
                             FailureFormatter.details(failure.exception?.context),
                             needsSetup = true,
                         ))
@@ -545,7 +557,7 @@ class ChatRunner(
                     return
                 }
                 is Decision.NoAlternative -> {
-                    val why = d.reasons.joinToString("; ") { (p, r) -> "${p.label}: $r" }
+                    val why = d.reasons.joinToString("; ") { (p, r) -> "${source.labelOf(p)}: $r" }
                     _state.update {
                         it.copy(problem = ChatProblem(
                             ErrorMessages.of(error!!) + " No other provider is ready" + (if (why.isEmpty()) "." else " ($why).") +
@@ -568,8 +580,8 @@ class ChatRunner(
         }
     }
 
-    private fun resetNote(provider: AiProvider): String {
-        val r = ledger.record(provider) ?: return "reset time unknown"
+    private fun resetNote(provider: ProviderId): String {
+        val r = quotaRecord(provider) ?: return "reset time unknown"
         val until = r.exhaustedUntil ?: return "reset time unknown"
         val when_ = ResetFormat.describe(Instant.ofEpochMilli(until), Instant.ofEpochMilli(clock()), zone)
         return when (r.source) {
@@ -580,29 +592,29 @@ class ChatRunner(
         }
     }
 
-    private fun switchNotSavedProblem(from: AiProvider, to: AiProvider) = ChatProblem(
-        "${from.label} has used its quota and I was about to switch to ${to.label}, but I couldn't save that change, so " +
-            "I did not switch and nothing was sent to ${to.label}. Your message is saved. Retry to try again, or choose " +
+    private fun switchNotSavedProblem(from: ProviderId, to: ProviderId) = ChatProblem(
+        "${source.labelOf(from)} has used its quota and I was about to switch to ${source.labelOf(to)}, but I couldn't save that change, so " +
+            "I did not switch and nothing was sent to ${source.labelOf(to)}. Your message is saved. Retry to try again, or choose " +
             "another provider yourself under AI providers.",
         null,
         needsSetup = false,
     )
 
-    private fun cancelledProblem(from: AiProvider) = ChatProblem(
-        "Switch cancelled. I stayed with ${from.label}, which has used its quota, so I can't answer until you pick " +
+    private fun cancelledProblem(from: ProviderId) = ChatProblem(
+        "Switch cancelled. I stayed with ${source.labelOf(from)}, which has used its quota, so I can't answer until you pick " +
             "another provider or its quota resets.",
         null,
         needsSetup = true,
     )
 
     /** The five-second announcement. Returns false if the user cancelled. Pauses while the app is off screen. */
-    private suspend fun countdown(from: AiProvider, to: Candidate, resetNote: String): Boolean {
+    private suspend fun countdown(from: ProviderId, to: Candidate, resetNote: String): Boolean {
         val cancel = CompletableDeferred<Unit>()
         failoverCancel = cancel
         failingProvider = from
         try {
             for (s in countdownSeconds downTo 1) {
-                _state.update { it.copy(failover = FailoverOffer(from, to.provider, to.model, s, resetNote)) }
+                _state.update { it.copy(failover = FailoverOffer(from, source.labelOf(from), to.provider, source.labelOf(to.provider), to.model, s, resetNote)) }
                 visible.first { it } // never switch while the user can't see the announcement
                 if (withTimeoutOrNull(tickMs) { cancel.await() } != null) return false
             }
@@ -619,9 +631,9 @@ class ChatRunner(
     private suspend fun generate(
         r: Resolved.Ready,
         llmIn: LlmProvider,
-        requested: AiProvider,
+        requested: ProviderId,
         simulated: Boolean,
-        switchedFrom: Triple<AiProvider, String, String?>?,
+        switchedFrom: Triple<ProviderId, String, String?>?,
     ): GenResult {
         val label = r.target.providerLabel
         var dispatchedAt = 0L
@@ -659,9 +671,10 @@ class ChatRunner(
                 val err = (result as? GenResult.Failure)?.error
                 trace.record(
                     TraceEvent(
-                        originalProvider = switchedFrom?.first, originalModel = switchedFrom?.second,
+                        originalProvider = switchedFrom?.first, originalLabel = switchedFrom?.first?.let { source.labelOf(it) },
+                        originalModel = switchedFrom?.second,
                         classification = switchedFrom?.third,
-                        fallbackProvider = r.target.provider, fallbackModel = r.target.model,
+                        fallbackProvider = r.target.provider, fallbackLabel = r.target.providerLabel, fallbackModel = r.target.model,
                         adapter = llm.adapterName, stage = "attempt finished",
                         streamStarted = streamStarted, responseReceived = ok,
                         dispatchedAtMillis = dispatchedAt,
@@ -673,8 +686,8 @@ class ChatRunner(
         return result
     }
 
-    private fun setDispatch(requested: AiProvider, t: ChatTarget, llm: LlmProvider, stage: DispatchStage, simulated: Boolean) {
-        _state.update { it.copy(dispatch = DispatchInfo(requested, t.provider, llm.javaClass.simpleName, t.model, stage, simulated)) }
+    private fun setDispatch(requested: ProviderId, t: ChatTarget, llm: LlmProvider, stage: DispatchStage, simulated: Boolean) {
+        _state.update { it.copy(dispatch = DispatchInfo(requested, source.labelOf(requested), t.provider, llm.javaClass.simpleName, t.model, stage, simulated)) }
     }
 
     companion object {

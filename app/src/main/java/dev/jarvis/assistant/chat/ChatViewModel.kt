@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import dev.jarvis.assistant.ai.Providers
 import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.memory.Memories
+import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.ProviderRegistry
 import dev.jarvis.assistant.providers.QuotaLedgers
-import dev.jarvis.assistant.settings.SecureKeyStore
+import dev.jarvis.assistant.settings.AndroidKeyBook
 import dev.jarvis.assistant.settings.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -20,21 +22,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val storage = FileChatStorage(File(app.filesDir, "chats"))
     private val ledger = QuotaLedgers.get(app)
     private val settingsRepo = SettingsRepository(app)
-    private val keyStore = SecureKeyStore(app)
+    private val registry = ProviderRegistry.withBuiltIns()
+    private val keyBook = AndroidKeyBook.create(app, registry)
     private val hooks = AndroidMemoryHooks(settingsRepo, Memories.get(app))
+    private val source = SettingsProviderSource(
+        registry = registry,
+        settings = { settingsRepo.settings.first() },
+        readKey = { id -> withContext(Dispatchers.IO) { keyBook.read(id) } },
+        hasKey = keyBook::has,
+        llmFor = Providers::forProvider,
+        ledger = ledger,
+        savePreferred = { p -> settingsRepo.update { it.copy(provider = p) } },
+    )
     private val runner = ChatRunner(
         storage = storage,
         engine = ChatEngine(storage, memory = hooks),
         scope = viewModelScope,
         io = Dispatchers.IO,
-        source = SettingsProviderSource(
-            settings = { settingsRepo.settings.first() },
-            readKey = { name -> withContext(Dispatchers.IO) { keyStore.read(name) } },
-            hasKey = keyStore::has,
-            llmFor = Providers::forProvider,
-            ledger = ledger,
-            savePreferred = { p -> settingsRepo.update { it.copy(provider = p) } },
-        ),
+        source = source,
         ledger = ledger,
         network = AndroidNetworkWatcher(app),
         trace = DiagnosticsTraceSink(DiagnosticsLog, { DiagnosticsLog.entries.value }),
@@ -54,7 +59,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelFailover() = runner.cancelFailover()
     fun setVisible(visible: Boolean) = runner.setVisible(visible)
     fun armSimulation() = runner.armSimulation()
-    fun choosePreferred(provider: dev.jarvis.assistant.settings.AiProvider) = runner.choosePreferred(provider)
+    fun choosePreferred(provider: ProviderId) = runner.choosePreferred(provider)
+
+    /** The name to show for a provider id. Display only. */
+    fun labelOf(id: ProviderId): String = source.labelOf(id)
     fun acceptRecovery() = runner.acceptRecovery()
     fun declineRecovery() = runner.declineRecovery()
     fun checkRecovery() = runner.checkRecovery()

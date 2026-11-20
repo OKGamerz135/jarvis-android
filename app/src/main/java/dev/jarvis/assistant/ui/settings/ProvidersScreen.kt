@@ -91,7 +91,7 @@ fun ProvidersScreen(
     }
     // One status model for every card: configured, tested, preferred and active are separate facts (B1).
     val statuses = ProviderStatusModel.all(
-        vm.registry.all(), keyStates, s.acknowledged.map { it.toId() }.toSet(), testStates, s.provider.toId(), chat.preferredProvider?.toId(),
+        vm.registry.all(), keyStates, s.acknowledged.map { it.toId() }.toSet(), testStates, s.provider.toId(), chat.preferredProvider,
     )
 
     Column(modifier) {
@@ -258,7 +258,7 @@ private fun ChooseChatProviderTab(
                             enabled = index < order.lastIndex,
                             onClick = { vm.update { it.copy(providerOrder = move(order, index, +1)) } },
                         ) { Text("Down") }
-                        TextButton(enabled = p != s.provider, onClick = { chatVm.choosePreferred(p) }) { Text("Make preferred") }
+                        TextButton(enabled = p != s.provider, onClick = { chatVm.choosePreferred(p.toId()) }) { Text("Make preferred") }
                     }
                     if (record != null) {
                         OutlinedButton(onClick = { ledger.clear(p); chatVm.checkRecovery() }) { Text("Mark as available") }

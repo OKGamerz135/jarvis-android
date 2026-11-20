@@ -133,12 +133,12 @@ class ConnectionTester(
     private suspend fun preflight(provider: ProviderId): Pair<Go?, String?> {
         val builtIn = provider.toAiProviderOrNull()
             ?: return null to "${labelOf(provider)} can't be tested here yet. Nothing was sent."
-        return when (val r = source.resolve(builtIn)) {
+        return when (val r = source.resolve(provider)) {
             is Resolved.Stop -> null to r.problem.message
             is Resolved.Ready ->
-                if (r.target.provider != builtIn) {
+                if (r.target.provider != provider) {
                     // A resolver that answers for another provider would reintroduce the old bug. Refuse loudly.
-                    null to "Internal error: asked for ${labelOf(provider)} but was given ${r.target.provider.label}. Nothing was sent."
+                    null to "Internal error: asked for ${labelOf(provider)} but was given ${r.target.providerLabel}. Nothing was sent."
                 } else {
                     Go(r.target, r.llm, builtIn) to null
                 }

@@ -6,6 +6,10 @@ import dev.jarvis.assistant.ai.LlmError
 import dev.jarvis.assistant.ai.LlmException
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.ai.ResetSource
+import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.toAiProviderOrNull
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.JarvisSettings
 import kotlinx.coroutines.CoroutineScope
@@ -79,8 +83,8 @@ class ChatRunnerPreferredTest {
         assertEquals(listOf(R), src.savedPreferred.toList())
         assertEquals(R, src.preferred)
         val s = run.idle()
-        assertEquals(R, s.temporaryProvider)
-        assertEquals("the question about switching back is about the ORIGINAL provider", G, s.preferredProvider)
+        assertEquals(R.toId(), s.temporaryProvider)
+        assertEquals("the question about switching back is about the ORIGINAL provider", G.toId(), s.preferredProvider)
 
         run.ask("two")
         assertEquals("the exhausted provider is not asked again", 1, g.calls.get())
@@ -108,8 +112,8 @@ class ChatRunnerPreferredTest {
         run.idle(); val s = run.ask("hi")
         assertEquals(listOf(R, C), src.savedPreferred.toList())
         assertEquals(C, src.preferred)
-        assertEquals(C, s.temporaryProvider)
-        assertEquals(G, s.preferredProvider)
+        assertEquals(C.toId(), s.temporaryProvider)
+        assertEquals(G.toId(), s.preferredProvider)
         assertEquals(1, g.calls.get()); assertEquals(1, r.calls.get()); assertEquals(1, c.calls.get())
     }
 
@@ -131,7 +135,7 @@ class ChatRunnerPreferredTest {
         run.idle(); run.ask("hi")
         now += 4_000_000 // the quota reset time has passed
         run.checkRecovery()
-        run.until { it.recoveryOffer == G }
+        run.until { it.recoveryOffer == G.toId() }
         run.acceptRecovery()
         val s = run.until { it.temporaryProvider == null }
         assertEquals(listOf(R, G), src.savedPreferred.toList())
@@ -146,9 +150,9 @@ class ChatRunnerPreferredTest {
         val src = FakeSource(mapOf(G to g, R to r, C to c), preferred = G).also { it.ledger = ledger }
         val run = runner(src)
         run.idle(); run.ask("one")
-        assertEquals(R, run.state.value.temporaryProvider)
+        assertEquals(R.toId(), run.state.value.temporaryProvider)
 
-        run.choosePreferred(C)
+        run.choosePreferred(C.toId())
         val s = run.until { it.temporaryProvider == null }
         assertNull(s.preferredProvider); assertNull(s.recoveryOffer)
         assertEquals(C, src.preferred)
@@ -164,7 +168,7 @@ class ChatRunnerPreferredTest {
         val src = FakeSource(mapOf(G to g, R to r, C to c), preferred = G).also { it.ledger = ledger }
         val run = runner(src)
         run.idle(); run.ask("one")
-        run.until { it.temporaryProvider == R }
+        run.until { it.temporaryProvider == R.toId() }
         src.preferred = C // changed by some other part of the app, not through the runner
         val s = run.ask("two")
         assertEquals(1, c.calls.get())
@@ -177,9 +181,10 @@ class ChatRunnerPreferredTest {
     /** The real resolver over fake settings: the preferred provider has no key, two others are fully configured. */
     private fun realSource(preferred: AiProvider, keyed: Set<AiProvider>, llms: Map<AiProvider, LlmProvider>, failover: Boolean = true) =
         SettingsProviderSource(
+            registry = ProviderRegistry.withBuiltIns(),
             settings = { JarvisSettings(provider = preferred, acknowledged = AiProvider.entries.toSet(), failoverEnabled = failover) },
-            readKey = { name -> AiProvider.entries.first { it.keyName == name }.takeIf { it in keyed }?.let { "key-${it.name}" } },
-            hasKey = { name -> AiProvider.entries.first { it.keyName == name } in keyed },
+            readKey = { id -> id.toAiProviderOrNull()?.takeIf { it in keyed }?.let { "key-${it.name}" } },
+            hasKey = { id -> id.toAiProviderOrNull() in keyed },
             llmFor = { llms.getValue(it) },
             ledger = ledger,
             savePreferred = {},
@@ -202,8 +207,9 @@ class ChatRunnerPreferredTest {
         val r = ok("groq answer")
         val keyed = java.util.concurrent.CopyOnWriteArraySet(setOf(G))
         val src = SettingsProviderSource(
+            registry = ProviderRegistry.withBuiltIns(),
             settings = { JarvisSettings(provider = R, acknowledged = AiProvider.entries.toSet()) },
-            readKey = { name -> AiProvider.entries.first { it.keyName == name }.takeIf { it in keyed }?.let { "k" } },
+            readKey = { id -> id.toAiProviderOrNull()?.takeIf { it in keyed }?.let { "k" } },
             hasKey = { false }, llmFor = { r }, ledger = ledger, savePreferred = {},
         )
         val run = runner(src)
@@ -226,7 +232,7 @@ class ChatRunnerPreferredTest {
 
     /** Wraps a source so that saving the preferred provider takes as long as the test wants. */
     private class SlowSave(val inner: FakeSource, val gate: kotlinx.coroutines.CompletableDeferred<Unit>) : ProviderSource by inner {
-        override suspend fun setPreferred(provider: AiProvider) { gate.await(); inner.setPreferred(provider) }
+        override suspend fun setPreferred(provider: ProviderId) { gate.await(); inner.setPreferred(provider) }
     }
 
     @Test fun aMessageSentWhileSwitchBackIsStillBeingSavedGoesToTheProviderJustChosen() = runBlocking {
@@ -236,7 +242,7 @@ class ChatRunnerPreferredTest {
         val run = runner(SlowSave(fake, gate))
         run.idle()
         // Start from "the preferred provider is Groq, Gemini was the original" without a real failover:
-        run.choosePreferred(G)               // the save is held back by the gate
+        run.choosePreferred(G.toId())               // the save is held back by the gate
         val sent = async { run.ask("hello") } // sent while the save is still in progress
         delay(150)
         assertEquals("nothing may be sent through the old provider meanwhile", 0, r.calls.get() + g.calls.get())
@@ -252,8 +258,8 @@ class ChatRunnerPreferredTest {
     /** A source whose saving of the preferred provider fails (as long as [failing] is true). */
     private class FailingSave(val inner: FakeSource) : ProviderSource by inner {
         @Volatile var failing = true
-        val attempts = CopyOnWriteArrayList<AiProvider>()
-        override suspend fun setPreferred(provider: AiProvider) {
+        val attempts = CopyOnWriteArrayList<ProviderId>()
+        override suspend fun setPreferred(provider: ProviderId) {
             attempts += provider
             if (failing) throw java.io.IOException("disk full")
             inner.setPreferred(provider)
@@ -267,7 +273,7 @@ class ChatRunnerPreferredTest {
         val run = runner(src)
         run.idle()
         val s = run.ask("hello")
-        assertEquals(listOf(R), src.attempts.toList())
+        assertEquals(listOf(R.toId()), src.attempts.toList())
         assertEquals("nothing may be sent through the provider that could not be saved", 0, r.calls.get())
         assertNull("the app must not claim a switch that is not saved", s.temporaryProvider)
         assertNull(s.preferredProvider)
@@ -292,8 +298,8 @@ class ChatRunnerPreferredTest {
         // Saving works again: the switch now happens and is consistent.
         src.failing = false
         withTimeout(5000) { while (run.retry() != SendResult.ACCEPTED) delay(5) }
-        val s = run.until { it.temporaryProvider == R && !it.generating }
-        assertEquals(R, fake.preferred); assertEquals(1, r.calls.get()); assertEquals(G, s.preferredProvider)
+        val s = run.until { it.temporaryProvider == R.toId() && !it.generating }
+        assertEquals(R, fake.preferred); assertEquals(1, r.calls.get()); assertEquals(G.toId(), s.preferredProvider)
     }
 
     @Test fun manualPreferredChoiceThatCannotBeSavedChangesNothingAndSaysSo() = runBlocking {
@@ -302,7 +308,7 @@ class ChatRunnerPreferredTest {
         val src = FailingSave(fake)
         val run = runner(src)
         run.idle()
-        run.choosePreferred(R)
+        run.choosePreferred(R.toId())
         val s = run.until { it.preferenceError != null }
         assertTrue(s.preferenceError!!.contains("Couldn't save Groq"))
         assertEquals(G, fake.preferred)
@@ -311,7 +317,7 @@ class ChatRunnerPreferredTest {
         assertEquals(0, r.calls.get())
         // A later successful choice clears the error and takes effect.
         src.failing = false
-        run.choosePreferred(R)
+        run.choosePreferred(R.toId())
         run.until { it.preferenceError == null && fake.preferred == R }
         run.ask("again")
         assertEquals(1, r.calls.get())
@@ -325,12 +331,12 @@ class ChatRunnerPreferredTest {
         run.idle(); run.ask("one")
         assertEquals(R, fake.preferred)
         now += 4_000_000
-        run.checkRecovery(); run.until { it.recoveryOffer == G }
+        run.checkRecovery(); run.until { it.recoveryOffer == G.toId() }
         src.failing = true
         run.acceptRecovery()
         val s = run.until { it.preferenceError != null }
-        assertEquals("still on the temporary provider", R, s.temporaryProvider)
-        assertEquals(G, s.preferredProvider)
+        assertEquals("still on the temporary provider", R.toId(), s.temporaryProvider)
+        assertEquals(G.toId(), s.preferredProvider)
         assertEquals(R, fake.preferred)
         assertNotNull("the exhausted record must survive a failed switch-back", ledger.record(G))
         run.ask("two")
@@ -350,13 +356,133 @@ class ChatRunnerPreferredTest {
         val src = FailingSave(fake)
         val run = runner(src)
         run.idle()
-        run.choosePreferred(G)                           // fails: an error is now showing
+        run.choosePreferred(G.toId())                           // fails: an error is now showing
         run.until { it.preferenceError != null }
         src.failing = false
         fake.preferred = G                               // the user picks Gemini some other way, so a failover can start from it
         run.ask("hello")                                 // Gemini is exhausted -> switches (and saves) successfully
         val s = run.until { it.temporaryProvider != null && !it.generating }
         assertNull("the old error must not stay on screen after a successful switch", s.preferenceError)
-        assertEquals(s.temporaryProvider, fake.preferred)
+        assertEquals(s.temporaryProvider, fake.preferred.toId())
+    }
+
+    // ------------------------------------------------------------------ C2d: providers that are not built-in fail closed
+
+    private val custom = ProviderId.newCustom()
+
+    /** Offers a custom provider as the first failover candidate. It can't run: resolving it is refused, as the real source does. */
+    private class WithCustomCandidate(val inner: FakeSource, val custom: ProviderId, val acceptSave: Boolean) : ProviderSource by inner {
+        val resolved = CopyOnWriteArrayList<ProviderId?>()
+        val saveAttempts = CopyOnWriteArrayList<ProviderId>()
+        override suspend fun snapshot(): ProviderSnapshot {
+            val s = inner.snapshot()
+            return s.copy(candidates = listOf(Candidate(custom, "m", true, true, true, false)) + s.candidates)
+        }
+        override suspend fun resolve(provider: ProviderId?): Resolved {
+            resolved += provider
+            if (provider == custom) return Resolved.Stop(ChatProblem("That provider can't be used for chat yet.", null, true))
+            return inner.resolve(provider)
+        }
+        override suspend fun setPreferred(provider: ProviderId) {
+            saveAttempts += provider
+            if (provider == custom && acceptSave) return // pretends the save worked (the real source never does)
+            inner.setPreferred(provider)               // throws for a provider that is not built-in
+        }
+    }
+
+    @Test fun aFailoverTargetThatCannotBeSavedAsPreferredIsNeverSwitchedToAndNothingIsSentThroughAnyOtherProvider() = runBlocking {
+        val g = failing(quota()); val r = ok("from groq")
+        val fake = FakeSource(mapOf(G to g, R to r), preferred = G).also { it.ledger = ledger }
+        val src = WithCustomCandidate(fake, custom, acceptSave = false)
+        val run = runner(src)
+        run.idle(); val s = run.ask("hello")
+        assertEquals(listOf(custom), src.saveAttempts.toList())
+        assertEquals(1, g.calls.get()); assertEquals("no other provider may be used instead", 0, r.calls.get())
+        assertNull(s.temporaryProvider); assertNull(s.preferredProvider)
+        assertEquals("the saved preference is unchanged", G, fake.preferred)
+        assertTrue(fake.savedPreferred.isEmpty())
+        assertTrue(s.problem!!.message, s.problem!!.message.contains("did not switch"))
+    }
+
+    @Test fun aFailoverTargetThatCannotRunStopsWithAMessageAndNeverLoopsOrFallsBack() = runBlocking {
+        val g = failing(quota()); val r = ok("from groq")
+        val fake = FakeSource(mapOf(G to g, R to r), preferred = G).also { it.ledger = ledger }
+        val src = WithCustomCandidate(fake, custom, acceptSave = true)
+        val run = runner(src)
+        run.idle(); val s = run.ask("hello")
+        assertEquals("asked once, not retried in a loop", 1, src.resolved.count { it == custom })
+        assertEquals(1, g.calls.get()); assertEquals(0, r.calls.get())
+        assertTrue(s.problem!!.message, s.problem!!.message.contains("can't be used for chat yet"))
+        assertEquals("the user's message is kept", listOf("hello"), s.conversation.messages.map { it.text })
+    }
+
+    @Test fun choosingAProviderThatIsNotBuiltInChangesNothingAndSaysSo() = runBlocking {
+        val g = ok("from gemini")
+        val fake = FakeSource(mapOf(G to g), preferred = G).also { it.ledger = ledger }
+        val run = runner(fake)
+        run.idle()
+        run.choosePreferred(custom)
+        val s = run.until { it.preferenceError != null }
+        assertTrue(s.preferenceError!!, s.preferenceError!!.contains("so nothing was changed"))
+        assertTrue(s.preferenceError!!, s.preferenceError!!.contains("Unknown provider"))
+        assertTrue(fake.savedPreferred.isEmpty())
+        assertEquals(G, fake.preferred)
+        val after = run.ask("hello")
+        assertEquals("chat still goes to the saved provider", 1, g.calls.get())
+        assertEquals("from gemini", after.conversation.messages.last().text)
+    }
+
+    @Test fun theCountdownAnnouncementNamesTheProvidersFromTheirOwnLabels() = runBlocking {
+        val g = failing(quota()); val r = ok("x")
+        val src = FakeSource(mapOf(G to g, R to r), preferred = G).also { it.ledger = ledger }
+        val run = ChatRunner(storage, ChatEngine(storage), scope, Dispatchers.IO, src, ledger, FakeNetwork(), clock = { now }, countdownSeconds = 50, tickMs = 20)
+        run.idle(); run.send("hi")
+        val offer = run.until { it.failover != null }.failover!!
+        assertEquals(G.toId(), offer.from); assertEquals(R.toId(), offer.to)
+        assertEquals(G.label, offer.fromLabel); assertEquals(R.label, offer.toLabel)
+        assertTrue(offer.announcement.contains("Switching to ${R.label}"))
+        assertTrue(offer.disclosure.contains("will be sent to ${R.label}"))
+        run.cancelFailover(); run.idle(); Unit
+    }
+
+    /** A provider that is not built-in and, in this test only, can run. Used to prove the quota ledger bridge never maps it onto a built-in entry. */
+    private class CustomRunnable(val inner: FakeSource, val custom: ProviderId, val llm: LlmProvider) : ProviderSource by inner {
+        override suspend fun snapshot() = inner.snapshot().copy(preferred = custom)
+        override suspend fun resolve(provider: ProviderId?): Resolved {
+            val id = provider ?: custom
+            if (id == custom) return Resolved.Ready(ChatTarget(custom, "Custom", 10_000, "m", "KEY", "system"), llm)
+            return inner.resolve(provider)
+        }
+    }
+
+    @Test fun aQuotaErrorFromAProviderThatIsNotBuiltInNeverTouchesAnyBuiltInProvidersLedgerEntry() = runBlocking {
+        val bad = failing(quota()); val g = ok("from gemini"); val r = ok("from groq")
+        val fake = FakeSource(mapOf(G to g, R to r), preferred = G).also { it.ledger = ledger }
+        val run = runner(CustomRunnable(fake, custom, bad))
+        run.idle(); val s = run.ask("hello")
+        assertEquals(1, bad.calls.get())
+        assertTrue("no built-in provider may be recorded as used up: ${ledger.records.value}", ledger.records.value.isEmpty())
+        assertEquals("the failover went to the first ready built-in provider", 1, g.calls.get())
+        assertEquals(0, r.calls.get())
+        assertEquals("from gemini", s.conversation.messages.last().text)
+    }
+
+    @Test fun providersThatAllRunOutOfQuotaAreEachTriedOnceEvenWithoutAnyLedgerMemoryAndNeverLoop() = runBlocking {
+        val g = failing(quota()); val r = failing(quota())
+        val src = FakeSource(mapOf(G to g, R to r), preferred = G) // deliberately NOT linked to the ledger: only the per-message "already tried" set can stop a loop
+        val run = runner(src)
+        run.idle(); val s = run.ask("hello")
+        assertEquals(1, g.calls.get()); assertEquals(1, r.calls.get())
+        assertTrue(s.problem!!.message, s.problem!!.message.contains("No other provider is ready"))
+    }
+
+    @Test fun aSuccessfulAnswerClearsWhatWasRememberedAboutThatProvidersQuota() = runBlocking {
+        ledger.markExhausted(G, LlmError.QuotaExhausted(Instant.ofEpochMilli(now - 1_000), "PerDay", ResetSource.REPORTED))
+        assertNotNull(ledger.record(G))
+        val g = ok("fine")
+        val run = runner(FakeSource(mapOf(G to g), preferred = G).also { it.ledger = ledger })
+        run.idle(); run.ask("hello")
+        assertEquals(1, g.calls.get())
+        assertNull("the old record is out of date once the provider answered", ledger.record(G))
     }
 }
