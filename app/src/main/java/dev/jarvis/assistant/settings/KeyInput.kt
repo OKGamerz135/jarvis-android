@@ -1,5 +1,8 @@
 package dev.jarvis.assistant.settings
 
+import dev.jarvis.assistant.providers.ProviderDescriptor
+import dev.jarvis.assistant.providers.ProviderId
+
 // Pure Kotlin on purpose (no android.* imports) so it can be unit-tested on the build server.
 
 /** Keys shorter than this are rejected before anything is saved. (The existing rule, unchanged.) */
@@ -22,7 +25,7 @@ sealed interface KeyInputCheck {
 
     companion object {
         /** Same cleaning as before: every whitespace character is removed (pasted keys often carry a trailing newline). */
-        fun check(raw: String, provider: AiProvider): KeyInputCheck {
+        fun check(raw: String, provider: ProviderDescriptor): KeyInputCheck {
             if (raw.isEmpty()) return Untouched
             val cleaned = raw.filterNot { it.isWhitespace() }
             if (cleaned.isEmpty()) return BlankInput
@@ -31,7 +34,7 @@ sealed interface KeyInputCheck {
         }
 
         /** The text to show under the field, or null when there is nothing to say. Never echoes any part of the key. */
-        fun message(check: KeyInputCheck, provider: AiProvider): String? = when (check) {
+        fun message(check: KeyInputCheck, provider: ProviderDescriptor): String? = when (check) {
             Untouched -> null
             BlankInput -> "That is only spaces or line breaks. Paste the API key itself."
             is TooShort ->
@@ -43,20 +46,20 @@ sealed interface KeyInputCheck {
 }
 
 /** The result of a save or remove, as data: whether it is an error is never guessed from the wording. */
-data class KeyNotice(val provider: AiProvider, val message: String, val isError: Boolean) {
+data class KeyNotice(val provider: ProviderId, val message: String, val isError: Boolean) {
     companion object {
-        fun saved(provider: AiProvider, stored: Boolean) =
+        fun saved(provider: ProviderId, stored: Boolean) =
             if (stored) KeyNotice(provider, "Key saved.", false)
             else KeyNotice(provider, "Couldn't save the key: the phone didn't write it to storage. Nothing was changed.", true)
 
-        fun saveFailed(provider: AiProvider, e: Exception) =
+        fun saveFailed(provider: ProviderId, e: Exception) =
             KeyNotice(provider, "Couldn't save the key: ${e.javaClass.simpleName}: ${e.message}", true)
 
-        fun removed(provider: AiProvider, removed: Boolean) =
+        fun removed(provider: ProviderId, removed: Boolean) =
             if (removed) KeyNotice(provider, "Key removed.", false)
             else KeyNotice(provider, "Couldn't remove the key: the phone didn't write the change. Try again.", true)
 
-        fun removeFailed(provider: AiProvider, e: Exception) =
+        fun removeFailed(provider: ProviderId, e: Exception) =
             KeyNotice(provider, "Couldn't remove the key: ${e.javaClass.simpleName}: ${e.message}", true)
     }
 }
@@ -65,7 +68,7 @@ data class KeyNotice(val provider: AiProvider, val message: String, val isError:
 data class ModelInputNote(val effective: String, val usingDefault: Boolean, val message: String) {
     companion object {
         /** Blank (or only spaces) means the provider's default. No restrictions on what a model name looks like are invented. */
-        fun of(raw: String, provider: AiProvider): ModelInputNote {
+        fun of(raw: String, provider: ProviderDescriptor): ModelInputNote {
             val trimmed = raw.trim()
             if (trimmed.isEmpty()) {
                 return ModelInputNote(

@@ -4,7 +4,6 @@ import dev.jarvis.assistant.ai.AvailabilityState
 import dev.jarvis.assistant.ai.DiagState
 import dev.jarvis.assistant.ai.ProviderTestState
 import dev.jarvis.assistant.ai.TestState
-import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.KeyState
 
 // Pure Kotlin on purpose (no android.* imports) so it can be unit-tested on the build server.
@@ -39,7 +38,9 @@ enum class TestStatus(val label: String) {
  *  - [viaFailover]: it is active only because an automatic switch put it there.
  */
 data class ProviderStatusModel(
-    val provider: AiProvider,
+    val id: ProviderId,
+    /** The name to show, supplied by the caller from the provider's descriptor. The model does not look anything up. */
+    val label: String,
     val config: ConfigStatus,
     val test: TestStatus,
     val preferred: Boolean,
@@ -75,12 +76,13 @@ data class ProviderStatusModel(
          * had chosen before it (and [savedPreferred] is the one the switch put in use).
          */
         fun of(
-            provider: AiProvider,
+            id: ProviderId,
+            label: String,
             keyState: KeyState,
             acknowledged: Boolean,
             tests: ProviderTestState,
-            savedPreferred: AiProvider,
-            failoverFrom: AiProvider? = null,
+            savedPreferred: ProviderId,
+            failoverFrom: ProviderId? = null,
         ): ProviderStatusModel {
             val config = when {
                 keyState == KeyState.MISSING -> ConfigStatus.NO_KEY
@@ -89,29 +91,34 @@ data class ProviderStatusModel(
                 else -> ConfigStatus.CONFIGURED
             }
             val episode = failoverFrom != null && failoverFrom != savedPreferred
-            val selectedForChat = provider == savedPreferred
+            val selectedForChat = id == savedPreferred
             val configured = config == ConfigStatus.CONFIGURED
             return ProviderStatusModel(
-                provider = provider,
+                id = id,
+                label = label,
                 config = config,
                 test = testStatus(tests),
-                preferred = provider == (if (episode) failoverFrom else savedPreferred),
+                preferred = id == (if (episode) failoverFrom else savedPreferred),
                 active = selectedForChat && configured,
                 viaFailover = episode && selectedForChat && configured,
-                preferredPaused = episode && provider == failoverFrom,
+                preferredPaused = episode && id == failoverFrom,
                 chatBlocked = selectedForChat && !configured,
             )
         }
 
         /** The model of every provider, built the one way every screen uses (so no screen has its own status logic). */
         fun all(
-            keyStates: Map<AiProvider, KeyState>,
-            acknowledged: Set<AiProvider>,
-            tests: Map<AiProvider, ProviderTestState>,
-            savedPreferred: AiProvider,
-            failoverFrom: AiProvider?,
-        ): Map<AiProvider, ProviderStatusModel> = AiProvider.entries.associateWith { p ->
-            of(p, keyStates[p] ?: KeyState.MISSING, p in acknowledged, tests[p] ?: ProviderTestState(), savedPreferred, failoverFrom)
+            providers: List<ProviderDescriptor>,
+            keyStates: Map<ProviderId, KeyState>,
+            acknowledged: Set<ProviderId>,
+            tests: Map<ProviderId, ProviderTestState>,
+            savedPreferred: ProviderId,
+            failoverFrom: ProviderId?,
+        ): Map<ProviderId, ProviderStatusModel> = providers.associate { d ->
+            d.id to of(
+                d.id, d.label, keyStates[d.id] ?: KeyState.MISSING, d.id in acknowledged,
+                tests[d.id] ?: ProviderTestState(), savedPreferred, failoverFrom,
+            )
         }
 
         /**
@@ -124,13 +131,13 @@ data class ProviderStatusModel(
             val preferred = all.firstOrNull { it.preferred } ?: return failover
             val answering = all.firstOrNull { it.active || it.chatBlocked }
             if (preferred.preferredPaused && answering != null && answering.viaFailover) {
-                return "Preferred: ${preferred.provider.label} (paused). Answering now: ${answering.provider.label} " +
+                return "Preferred: ${preferred.label} (paused). Answering now: ${answering.label} " +
                     "(automatic failover, ${answering.shortState()}). $failover"
             }
             if (preferred.chatBlocked) {
-                return "Preferred: ${preferred.provider.label}, ${preferred.config.short()}. Chat can't answer until this is fixed. $failover"
+                return "Preferred: ${preferred.label}, ${preferred.config.short()}. Chat can't answer until this is fixed. $failover"
             }
-            return "Preferred: ${preferred.provider.label}, ${preferred.shortState()}. $failover"
+            return "Preferred: ${preferred.label}, ${preferred.shortState()}. $failover"
         }
 
         /**

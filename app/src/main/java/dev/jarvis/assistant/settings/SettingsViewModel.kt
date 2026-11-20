@@ -3,6 +3,8 @@ package dev.jarvis.assistant.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.ProviderRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +17,9 @@ import kotlinx.coroutines.launch
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SettingsRepository(app)
-    private val keys = SecureKeyStore(app)
+    /** The providers this screen shows. Only the built-in ones exist until custom providers are added. */
+    val registry: ProviderRegistry = ProviderRegistry.withBuiltIns()
+    private val keys = AndroidKeyBook.create(app, registry)
 
     /** Null only for the split second before the saved settings have been read. */
     val settings: StateFlow<JarvisSettings?> = repo.settings
@@ -27,18 +31,18 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
      * reading every key as soon as the screen needs it ([refreshKeys]), so it can't keep saying "saved" for a key that
      * no longer decrypts.
      */
-    private val _keyState = MutableStateFlow(AiProvider.entries.associateWith { if (keys.has(it.keyName)) KeyState.USABLE else KeyState.MISSING })
-    val keyState: StateFlow<Map<AiProvider, KeyState>> = _keyState.asStateFlow()
+    private val _keyState = MutableStateFlow(keys.presence())
+    val keyState: StateFlow<Map<ProviderId, KeyState>> = _keyState.asStateFlow()
 
     /** True only for keys that are stored AND readable. */
-    val keyPresent: StateFlow<Map<AiProvider, Boolean>> = _keyState
+    val keyPresent: StateFlow<Map<ProviderId, Boolean>> = _keyState
         .map { states -> states.mapValues { it.value == KeyState.USABLE } }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, AiProvider.entries.associateWith { keys.has(it.keyName) })
+        .stateIn(viewModelScope, SharingStarted.Eagerly, keys.presence().mapValues { it.value == KeyState.USABLE })
 
     init {
         refreshKeys()
         // SambaNova was removed from the app. Delete any key saved for it so nothing is left behind.
-        viewModelScope.launch(Dispatchers.IO) { runCatching { keys.remove("sambanova_api_key") } }
+        viewModelScope.launch(Dispatchers.IO) { keys.removeRetired() }
     }
 
     fun update(transform: (JarvisSettings) -> JarvisSettings) {
@@ -50,10 +54,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** A short message about the last key action, or null. Failures show here instead of crashing. */
     val notice: StateFlow<KeyNotice?> = _notice.asStateFlow()
 
-    fun saveKey(provider: AiProvider, key: String) {
+    fun saveKey(provider: ProviderId, key: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val stored = keys.save(provider.keyName, key.filterNot { it.isWhitespace() })
+                val stored = keys.save(provider, key.filterNot { it.isWhitespace() })
                 _notice.value = KeyNotice.saved(provider, stored)
                 if (stored) KeyChanges.changed(provider)
             } catch (e: CancellationException) {
@@ -65,10 +69,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun removeKey(provider: AiProvider) {
+    fun removeKey(provider: ProviderId) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val removed = keys.remove(provider.keyName)
+                val removed = keys.remove(provider)
                 _notice.value = KeyNotice.removed(provider, removed)
                 if (removed) KeyChanges.changed(provider)
             } catch (e: CancellationException) {
@@ -91,10 +95,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun readKeyStates() {
         val before = _keyState.value
-        val now = AiProvider.entries.associateWith { keys.state(it.keyName) }
+        val now = keys.states()
         _keyState.value = now
         // A key that stopped being usable behind our back (for example it was deleted because it could never be
         // decrypted) also makes any test result obtained with it stale.
-        for (p in AiProvider.entries) if (before[p] == KeyState.USABLE && now[p] != KeyState.USABLE) KeyChanges.changed(p)
+        for (p in KeyChanges.lost(before, now)) KeyChanges.changed(p)
     }
 }

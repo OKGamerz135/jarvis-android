@@ -52,7 +52,10 @@ import dev.jarvis.assistant.ai.ConnectionTestViewModel
 import dev.jarvis.assistant.ai.PromptBuilder
 import dev.jarvis.assistant.ai.TestState
 import dev.jarvis.assistant.chat.ChatViewModel
+import dev.jarvis.assistant.providers.ProviderDescriptor
+import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.ProviderStatusModel
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.Humour
 import dev.jarvis.assistant.settings.Profanity
@@ -98,7 +101,9 @@ fun SettingsHubScreen(
             title = "AI providers",
             // The same status model the provider tabs use: configuration and test result are stated separately.
             subtitle = if (s == null) "" else ProviderStatusModel.hubSummary(
-                ProviderStatusModel.all(keyStates, s.acknowledged, testStates, s.provider, chat.preferredProvider).values,
+                ProviderStatusModel.all(
+                    vm.registry.all(), keyStates, s.acknowledged.map { it.toId() }.toSet(), testStates, s.provider.toId(), chat.preferredProvider?.toId(),
+                ).values,
                 s.failoverEnabled,
             ),
             onClick = onOpenProvider,
@@ -277,7 +282,7 @@ fun ProviderScreen(
 @Composable
 private fun ProviderContent(
     s: JarvisSettings,
-    keys: Map<AiProvider, KeyState>,
+    keys: Map<ProviderId, KeyState>,
     notice: KeyNotice?,
     vm: SettingsViewModel,
     testVm: ConnectionTestViewModel,
@@ -286,7 +291,8 @@ private fun ProviderContent(
     modifier: Modifier,
 ) {
     val acknowledged = provider in s.acknowledged
-    val keyState = keys[provider] ?: KeyState.MISSING
+    val keyState = keys[provider.toId()] ?: KeyState.MISSING
+    val descriptor = remember(provider) { ProviderDescriptor.of(provider) }
     val hasKey = keyState == KeyState.USABLE
 
     ScreenColumn(modifier) {
@@ -342,7 +348,7 @@ private fun ProviderContent(
             label = { Text("Model name") },
             supportingText = {
                 // Says exactly which model is used, and whether that is the default because the field is blank.
-                Text(ModelInputNote.of(model, provider).message + " Model names change; edit this if one stops working.")
+                Text(ModelInputNote.of(model, descriptor).message + " Model names change; edit this if one stops working.")
             },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -365,7 +371,7 @@ private fun ProviderContent(
                     if (hasKey) "Key saved, encrypted on this phone." else "A key is stored.",
                     color = MaterialTheme.colorScheme.primary,
                 )
-                OutlinedButton(onClick = { vm.removeKey(provider) }) { Text("Remove") }
+                OutlinedButton(onClick = { vm.removeKey(provider.toId()) }) { Text("Remove") }
             }
         }
         // Plain `remember` on purpose: an API key must never go into saved instance state (it would end up in the system's
@@ -380,8 +386,8 @@ private fun ProviderContent(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
-        val keyCheck = KeyInputCheck.check(keyInput, provider)
-        KeyInputCheck.message(keyCheck, provider)?.let { msg ->
+        val keyCheck = KeyInputCheck.check(keyInput, descriptor)
+        KeyInputCheck.message(keyCheck, descriptor)?.let { msg ->
             Text(
                 msg,
                 style = MaterialTheme.typography.bodySmall,
@@ -391,7 +397,7 @@ private fun ProviderContent(
         Button(
             enabled = acknowledged && keyCheck is KeyInputCheck.Valid,
             onClick = {
-                (keyCheck as? KeyInputCheck.Valid)?.let { vm.saveKey(provider, it.key) }
+                (keyCheck as? KeyInputCheck.Valid)?.let { vm.saveKey(provider.toId(), it.key) }
                 keyInput = ""
             },
         ) { Text("Save key") }
@@ -403,7 +409,7 @@ private fun ProviderContent(
             )
         }
         // The result of the last save/remove, only on the screen of the provider it was for.
-        if (notice != null && notice.provider == provider) {
+        if (notice != null && notice.provider == provider.toId()) {
             Text(
                 notice.message,
                 style = MaterialTheme.typography.bodySmall,

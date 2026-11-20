@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import dev.jarvis.assistant.chat.SettingsProviderSource
 import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.diag.UsageGuard
+import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.ProviderRegistry
 import dev.jarvis.assistant.providers.QuotaLedgers
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.KeyChanges
 import dev.jarvis.assistant.settings.SecureKeyStore
@@ -27,6 +30,7 @@ import kotlinx.coroutines.withContext
  */
 class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SettingsRepository(app)
+    private val registry = ProviderRegistry.withBuiltIns()
     private val keys = SecureKeyStore(app)
 
     private val tester = ConnectionTester(
@@ -39,12 +43,16 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
             ledger = QuotaLedgers.get(app),
             savePreferred = {}, // tests never change the chat provider
         ),
+        labelOf = ::labelOf,
         diagnosticsFor = Providers::diagnosticsFor,
         recentEntries = { DiagnosticsLog.entries.value },
     )
 
     /** Results per provider. A provider with no entry has nothing to show. */
-    val states: StateFlow<Map<AiProvider, ProviderTestState>> = tester.states
+    val states: StateFlow<Map<ProviderId, ProviderTestState>> = tester.states
+
+    /** The name to show for [id], from its registered descriptor. */
+    fun labelOf(id: ProviderId): String = registry.get(id)?.label ?: id.value
 
     /** The check running right now (any provider), or null. Only one runs at a time. */
     val active: StateFlow<ActiveTest?> = tester.active
@@ -53,7 +61,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     val generationCalls24h: StateFlow<Map<String, Int>> = DiagnosticsLog.entries
         .map { list ->
             val since = System.currentTimeMillis() - UsageGuard.DAY_MS
-            AiProvider.entries.associate { it.label to UsageGuard.generationCalls(list, it.label, since) }
+            registry.all().associate { it.label to UsageGuard.generationCalls(list, it.label, since) }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
@@ -61,7 +69,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
         // A changed model or key makes that provider's earlier results stale.
         viewModelScope.launch {
             repo.settings
-                .map { s -> AiProvider.entries.associateWith { s.modelOf(it) } }
+                .map { s -> AiProvider.entries.associate { it.toId() to s.modelOf(it) } }
                 .distinctUntilChanged()
                 .collect { tester.onModelsObserved(it) }
         }
@@ -69,7 +77,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Each returns false when another check is already running (nothing was started). */
-    fun checkAvailability(provider: AiProvider): Boolean = tester.checkAvailability(provider)
-    fun runTest(provider: AiProvider, prompt: String): Boolean = tester.runTest(provider, prompt)
-    fun runDiagnostics(provider: AiProvider): Boolean = tester.runDiagnostics(provider)
+    fun checkAvailability(provider: ProviderId): Boolean = tester.checkAvailability(provider)
+    fun runTest(provider: ProviderId, prompt: String): Boolean = tester.runTest(provider, prompt)
+    fun runDiagnostics(provider: ProviderId): Boolean = tester.runDiagnostics(provider)
 }

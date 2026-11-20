@@ -25,6 +25,7 @@ import dev.jarvis.assistant.ai.ConnectionTestViewModel
 import dev.jarvis.assistant.ai.ProviderTestState
 import dev.jarvis.assistant.ai.DiagState
 import dev.jarvis.assistant.ai.TestState
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 
 @Composable
@@ -36,10 +37,10 @@ internal fun ProviderTools(
 ) {
     // Results belong to THIS provider only; another provider's results are never shown here.
     val all by vm.states.collectAsStateWithLifecycle()
-    val shown = all[provider] ?: ProviderTestState()
+    val shown = all[provider.toId()] ?: ProviderTestState()
     val active by vm.active.collectAsStateWithLifecycle()
     // One check at a time, for any provider (they share free quota and a cooldown).
-    val other = active?.takeIf { it.provider != provider }
+    val other = active?.takeIf { it.provider != provider.toId() }
     val canStart = ready && active == null
 
     if (!ready) {
@@ -51,7 +52,7 @@ internal fun ProviderTools(
     }
     if (other != null) {
         Text(
-            "A check for ${other.provider.label} is running. Only one check runs at a time, so wait for it to finish.",
+            "A check for ${vm.labelOf(other.provider)} is running. Only one check runs at a time, so wait for it to finish.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -93,7 +94,7 @@ private fun AvailabilityCard(provider: AiProvider, canStart: Boolean, state: Ava
         "Asks ${provider.label} whether your key can see this model. Generates nothing and uses no generation quota. " +
             "It does not prove that generating works.",
     )
-    Button(enabled = canStart, onClick = { vm.checkAvailability(provider) }) {
+    Button(enabled = canStart, onClick = { vm.checkAvailability(provider.toId()) }) {
         Text("Check availability")
     }
     when (val s = state) {
@@ -136,7 +137,7 @@ private fun GenerationCard(provider: AiProvider, canStart: Boolean, state: TestS
     )
     Button(
         enabled = canStart && prompt.isNotBlank(),
-        onClick = { vm.runTest(provider, prompt.trim()) },
+        onClick = { vm.runTest(provider.toId(), prompt.trim()) },
     ) { Text("Send test message") }
     Hint("${provider.label} generation requests from this phone in the last 24 hours, failed ones included: $used")
 
@@ -178,7 +179,7 @@ private fun DiagnosticsCard(provider: AiProvider, canStart: Boolean, state: Diag
             "with a server-side error does it make one more generation call, not streamed, to compare. " +
             "So it uses at most 2 generation requests.",
     )
-    OutlinedButton(enabled = canStart, onClick = { vm.runDiagnostics(provider) }) {
+    OutlinedButton(enabled = canStart, onClick = { vm.runDiagnostics(provider.toId()) }) {
         Text("Run diagnostics")
     }
     when (val d = state) {

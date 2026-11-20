@@ -23,7 +23,7 @@ class ProviderStatusModelTest {
     private fun status(
         p: AiProvider = Q, key: KeyState = KeyState.USABLE, ack: Boolean = true, tests: ProviderTestState = none,
         preferred: AiProvider = G, from: AiProvider? = null,
-    ) = ProviderStatusModel.of(p, key, ack, tests, preferred, from)
+    ) = ProviderStatusModel.of(p.toId(), ProviderDescriptor.of(p).label, key, ack, tests, preferred.toId(), from?.toId())
 
     // ------------------------------------------------------------------ configured
 
@@ -193,7 +193,14 @@ class ProviderStatusModelTest {
         keys: Map<AiProvider, KeyState> = emptyMap(), ack: Set<AiProvider> = AiProvider.entries.toSet(),
         tests: Map<AiProvider, ProviderTestState> = emptyMap(),
     ) = ProviderStatusModel.hubSummary(
-        ProviderStatusModel.all(AiProvider.entries.associateWith { keys[it] ?: KeyState.USABLE }, ack, tests, preferred, from).values,
+        ProviderStatusModel.all(
+            ProviderRegistry.withBuiltIns().all(),
+            AiProvider.entries.associate { it.toId() to (keys[it] ?: KeyState.USABLE) },
+            ack.map { it.toId() }.toSet(),
+            tests.mapKeys { it.key.toId() },
+            preferred.toId(),
+            from?.toId(),
+        ).values,
         failover,
     )
 
@@ -239,9 +246,65 @@ class ProviderStatusModelTest {
     }
 
     @Test fun theSharedBuilderGivesEveryProviderExactlyOneModelWithTheSameRules() {
-        val all = ProviderStatusModel.all(emptyMap(), emptySet(), emptyMap(), G, null)
-        assertEquals(AiProvider.entries.toSet(), all.keys)
+        val all = ProviderStatusModel.all(ProviderRegistry.withBuiltIns().all(), emptyMap(), emptySet(), emptyMap(), G.toId(), null)
+        assertEquals(AiProvider.entries.map { it.toId() }.toSet(), all.keys)
         assertTrue(all.values.all { it.config == ConfigStatus.NO_KEY && it.test == TestStatus.NOT_TESTED })
         assertEquals(1, all.values.count { it.preferred })
+    }
+
+    // ------------------------------------------------------------------ C2c: ids and labels
+
+    @Test fun theLabelIsWhateverTheCallerSuppliedAndTheModelLooksNothingUp() {
+        val m = ProviderStatusModel.of(Q.toId(), "Any name at all", KeyState.USABLE, true, none, G.toId())
+        assertEquals("Any name at all", m.label)
+        assertEquals(Q.toId(), m.id)
+    }
+
+    @Test fun builtInLabelsFromTheDescriptorsAreTheOnesTheScreensAlwaysShowed() {
+        val all = ProviderStatusModel.all(ProviderRegistry.withBuiltIns().all(), emptyMap(), emptySet(), emptyMap(), G.toId(), null)
+        for (p in AiProvider.entries) assertEquals(p.label, all.getValue(p.toId()).label)
+    }
+
+    @Test fun consentGivenForOneProviderIsNotConsentForAnother() {
+        val all = ProviderStatusModel.all(
+            ProviderRegistry.withBuiltIns().all(),
+            keyStates = AiProvider.entries.associate { it.toId() to KeyState.USABLE },
+            acknowledged = setOf(Q.toId()),
+            tests = emptyMap(), savedPreferred = G.toId(), failoverFrom = null,
+        )
+        assertEquals(ConfigStatus.CONFIGURED, all.getValue(Q.toId()).config)
+        for (p in AiProvider.entries - Q) assertEquals(p.name, ConfigStatus.NEEDS_CONSENT, all.getValue(p.toId()).config)
+    }
+
+    @Test fun oneProvidersKeyAndTestNeverShowUpOnAnother() {
+        val all = ProviderStatusModel.all(
+            ProviderRegistry.withBuiltIns().all(),
+            keyStates = mapOf(Q.toId() to KeyState.USABLE),
+            acknowledged = setOf(Q.toId()),
+            tests = mapOf(Q.toId() to none.copy(generation = genDone)),
+            savedPreferred = G.toId(), failoverFrom = null,
+        )
+        assertEquals(ConfigStatus.CONFIGURED, all.getValue(Q.toId()).config)
+        assertEquals(TestStatus.PASSED, all.getValue(Q.toId()).test)
+        for (p in AiProvider.entries - Q) {
+            assertEquals(p.name, ConfigStatus.NO_KEY, all.getValue(p.toId()).config)
+            assertEquals(p.name, TestStatus.NOT_TESTED, all.getValue(p.toId()).test)
+        }
+    }
+
+    @Test fun onlyTheProvidersGivenAppearAndACustomOneGetsItsOwnModel() {
+        val custom = ProviderDescriptor(ProviderId.newCustom(), "My endpoint", "custom_key_x", "m", "h", "n")
+        val all = ProviderStatusModel.all(listOf(ProviderDescriptor.of(G), custom), emptyMap(), emptySet(), emptyMap(), G.toId(), null)
+        assertEquals(setOf(G.toId(), custom.id), all.keys)
+        assertEquals("My endpoint", all.getValue(custom.id).label)
+    }
+
+    @Test fun preferredAndFailoverFollowTheIdsNotTheLabels() {
+        // two providers with the same label must still be told apart by id
+        val a = ProviderDescriptor(ProviderId.newCustom(), "Same", "k_a", "m", "h", "n")
+        val b = ProviderDescriptor(ProviderId.newCustom(), "Same", "k_b", "m", "h", "n")
+        val all = ProviderStatusModel.all(listOf(a, b), mapOf(a.id to KeyState.USABLE, b.id to KeyState.USABLE), setOf(a.id, b.id), emptyMap(), a.id, null)
+        assertTrue(all.getValue(a.id).active); assertFalse(all.getValue(b.id).active)
+        assertTrue(all.getValue(a.id).preferred); assertFalse(all.getValue(b.id).preferred)
     }
 }

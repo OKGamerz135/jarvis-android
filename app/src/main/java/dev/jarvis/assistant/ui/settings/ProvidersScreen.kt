@@ -44,12 +44,15 @@ import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.diag.UsageGuard
 import dev.jarvis.assistant.providers.ConfigStatus
 import dev.jarvis.assistant.providers.ProviderStatus
+import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.ProviderRegistry
 import dev.jarvis.assistant.providers.ProviderStatusModel
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.providers.TestStatus
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.settings.AiProvider
 import dev.jarvis.assistant.settings.JarvisSettings
-import dev.jarvis.assistant.settings.SecureKeyStore
+import dev.jarvis.assistant.settings.AndroidKeyBook
 import dev.jarvis.assistant.settings.SettingsViewModel
 import dev.jarvis.assistant.ui.ProvidersTab
 import dev.jarvis.assistant.ui.common.ActionRow
@@ -87,7 +90,9 @@ fun ProvidersScreen(
         return
     }
     // One status model for every card: configured, tested, preferred and active are separate facts (B1).
-    val statuses = ProviderStatusModel.all(keyStates, s.acknowledged, testStates, s.provider, chat.preferredProvider)
+    val statuses = ProviderStatusModel.all(
+        vm.registry.all(), keyStates, s.acknowledged.map { it.toId() }.toSet(), testStates, s.provider.toId(), chat.preferredProvider?.toId(),
+    )
 
     Column(modifier) {
         ProvidersTabRow(tab, onTabChange)
@@ -139,7 +144,7 @@ private fun ProvidersTabRow(selected: ProvidersTab, onSelect: (ProvidersTab) -> 
 @Composable
 private fun ChooseChatProviderTab(
     s: JarvisSettings,
-    statuses: Map<AiProvider, ProviderStatusModel>,
+    statuses: Map<ProviderId, ProviderStatusModel>,
     preferenceError: String?,
     simulationArmed: Boolean,
     vm: SettingsViewModel,
@@ -157,9 +162,9 @@ private fun ChooseChatProviderTab(
         Text(
             when {
                 answering == null -> ""
-                answering.chatBlocked -> "Chat is set to ${answering.provider.label}, but it can't answer yet. Messages are NOT sent anywhere until it is set up or you choose another provider."
-                answering.viaFailover -> "Chat is currently answered by ${answering.provider.label} (automatic failover)."
-                else -> "Chat is answered by ${answering.provider.label}."
+                answering.chatBlocked -> "Chat is set to ${answering.label}, but it can't answer yet. Messages are NOT sent anywhere until it is set up or you choose another provider."
+                answering.viaFailover -> "Chat is currently answered by ${answering.label} (automatic failover)."
+                else -> "Chat is answered by ${answering.label}."
             },
             style = MaterialTheme.typography.titleMedium,
         )
@@ -199,7 +204,7 @@ private fun ChooseChatProviderTab(
         SectionTitle("Providers, in failover order")
         val since = System.currentTimeMillis() - UsageGuard.DAY_MS
         order.forEachIndexed { index, p ->
-            val st = statuses.getValue(p)
+            val st = statuses.getValue(p.toId())
             val used = UsageGuard.generationCalls(log, p.label, since)
             val record = records[p]
             Card(
@@ -290,8 +295,8 @@ private fun ChooseChatProviderTab(
 @Composable
 private fun ConfigureProvidersTab(
     s: JarvisSettings,
-    statuses: Map<AiProvider, ProviderStatusModel>,
-    testStates: Map<AiProvider, ProviderTestState>,
+    statuses: Map<ProviderId, ProviderStatusModel>,
+    testStates: Map<ProviderId, ProviderTestState>,
     onConfigure: (AiProvider) -> Unit,
 ) {
     val context = LocalContext.current
@@ -313,8 +318,8 @@ private fun ConfigureProvidersTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         AiProvider.entries.forEach { p ->
-            val st = statuses.getValue(p)
-            val details = ProviderStatusModel.testDetails(testStates[p] ?: ProviderTestState())
+            val st = statuses.getValue(p.toId())
+            val details = ProviderStatusModel.testDetails(testStates[p.toId()] ?: ProviderTestState())
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -341,7 +346,7 @@ private fun ConfigureProvidersTab(
                                     quotaText = "Asking OpenRouter..."
                                     scope.launch {
                                         quotaText = try {
-                                            val key = withContext(Dispatchers.IO) { SecureKeyStore(context).read(p.keyName) }.orEmpty()
+                                            val key = withContext(Dispatchers.IO) { AndroidKeyBook.create(context, ProviderRegistry.withBuiltIns()).read(p.toId()) }.orEmpty()
                                             OpenRouterParsing.describe(Providers.openRouter().freeQuota(key))
                                         } catch (e: LlmException) {
                                             ErrorMessages.of(e.error)

@@ -4,6 +4,9 @@ import dev.jarvis.assistant.chat.ProviderSource
 import dev.jarvis.assistant.chat.Resolved
 import dev.jarvis.assistant.diag.DiagnosticEntry
 import dev.jarvis.assistant.diag.UsageGuard
+import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.toAiProviderOrNull
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -50,7 +53,7 @@ data class ProviderTestState(
 enum class TestKind { AVAILABILITY, GENERATION, DIAGNOSTICS }
 
 /** The one check that is running right now, and for which provider. */
-data class ActiveTest(val provider: AiProvider, val kind: TestKind)
+data class ActiveTest(val provider: ProviderId, val kind: TestKind)
 
 /**
  * Runs the availability check, the generation test and the diagnostics for the provider it is TOLD to test.
@@ -65,6 +68,8 @@ class ConnectionTester(
     private val scope: CoroutineScope,
     /** Resolves consent, key and model for the requested provider. Same rules the chat uses. */
     private val source: ProviderSource,
+    /** The name shown for a provider (from its registered descriptor). Used in messages, never to pick a provider. */
+    private val labelOf: (ProviderId) -> String,
     private val diagnosticsFor: (AiProvider) -> ProviderDiagnostics,
     private val recentEntries: () -> List<DiagnosticEntry>,
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -72,23 +77,23 @@ class ConnectionTester(
 ) {
     private val lock = Any()
     private var activeJob: Job? = null
-    private val epochs = HashMap<AiProvider, Int>()
-    private var lastModels: Map<AiProvider, String>? = null
+    private val epochs = HashMap<ProviderId, Int>()
+    private var lastModels: Map<ProviderId, String>? = null
 
-    private val _states = MutableStateFlow<Map<AiProvider, ProviderTestState>>(emptyMap())
-    val states: StateFlow<Map<AiProvider, ProviderTestState>> = _states.asStateFlow()
+    private val _states = MutableStateFlow<Map<ProviderId, ProviderTestState>>(emptyMap())
+    val states: StateFlow<Map<ProviderId, ProviderTestState>> = _states.asStateFlow()
 
     private val _active = MutableStateFlow<ActiveTest?>(null)
     val active: StateFlow<ActiveTest?> = _active.asStateFlow()
 
-    fun stateOf(provider: AiProvider): ProviderTestState = _states.value[provider] ?: ProviderTestState()
+    fun stateOf(provider: ProviderId): ProviderTestState = _states.value[provider] ?: ProviderTestState()
 
     // ------------------------------------------------------------------ plumbing
 
-    private fun epochOf(provider: AiProvider): Int = epochs[provider] ?: 0
+    private fun epochOf(provider: ProviderId): Int = epochs[provider] ?: 0
 
     /** Writes a result only if the provider's configuration has not changed since this run began. */
-    private fun publish(provider: AiProvider, epoch: Int, change: (ProviderTestState) -> ProviderTestState) {
+    private fun publish(provider: ProviderId, epoch: Int, change: (ProviderTestState) -> ProviderTestState) {
         synchronized(lock) {
             if (epochOf(provider) != epoch) return
             _states.value = _states.value + (provider to change(stateOf(provider)))
@@ -96,7 +101,7 @@ class ConnectionTester(
     }
 
     /** Returns false (and does nothing) when another check is already running. */
-    private fun start(provider: AiProvider, kind: TestKind, body: suspend (epoch: Int) -> Unit): Boolean {
+    private fun start(provider: ProviderId, kind: TestKind, body: suspend (epoch: Int) -> Unit): Boolean {
         val epoch: Int
         val job: Job
         synchronized(lock) {
@@ -118,23 +123,30 @@ class ConnectionTester(
         return true
     }
 
-    private class Go(val target: dev.jarvis.assistant.chat.ChatTarget, val llm: LlmProvider)
+    private class Go(val target: dev.jarvis.assistant.chat.ChatTarget, val llm: LlmProvider, val builtIn: AiProvider)
 
-    /** Consent and key checks for exactly [provider]. Returns the reason text instead of a target when not usable. */
-    private suspend fun preflight(provider: AiProvider): Pair<Go?, String?> =
-        when (val r = source.resolve(provider)) {
+    /**
+     * Consent and key checks for exactly [provider]. Returns the reason text instead of a target when not usable.
+     * Only built-in providers can be resolved today ([ProviderSource] still speaks [AiProvider]); an id that is not one
+     * is refused here, before anything is resolved or sent, and is never mapped to some other provider.
+     */
+    private suspend fun preflight(provider: ProviderId): Pair<Go?, String?> {
+        val builtIn = provider.toAiProviderOrNull()
+            ?: return null to "${labelOf(provider)} can't be tested here yet. Nothing was sent."
+        return when (val r = source.resolve(builtIn)) {
             is Resolved.Stop -> null to r.problem.message
             is Resolved.Ready ->
-                if (r.target.provider != provider) {
+                if (r.target.provider != builtIn) {
                     // A resolver that answers for another provider would reintroduce the old bug. Refuse loudly.
-                    null to "Internal error: asked for ${provider.label} but was given ${r.target.provider.label}. Nothing was sent."
+                    null to "Internal error: asked for ${labelOf(provider)} but was given ${r.target.provider.label}. Nothing was sent."
                 } else {
-                    Go(r.target, r.llm) to null
+                    Go(r.target, r.llm, builtIn) to null
                 }
         }
+    }
 
-    private fun cooldownLeftMs(provider: AiProvider): Long =
-        UsageGuard.cooldownRemainingMs(recentEntries(), provider.label, clock())
+    private fun cooldownLeftMs(provider: ProviderId): Long =
+        UsageGuard.cooldownRemainingMs(recentEntries(), labelOf(provider), clock())
 
     private fun cooldownMessage(ms: Long): String =
         "Wait ${(ms + 999) / 1000} more seconds. This pause between generation calls protects your free quota."
@@ -142,7 +154,7 @@ class ConnectionTester(
     // ------------------------------------------------------------------ configuration changes
 
     /** The key or the model of [provider] changed (or was removed): its results are stale. */
-    fun invalidate(provider: AiProvider) {
+    fun invalidate(provider: ProviderId) {
         synchronized(lock) {
             epochs[provider] = epochOf(provider) + 1
             if (_states.value.containsKey(provider)) _states.value = _states.value - provider
@@ -151,22 +163,22 @@ class ConnectionTester(
     }
 
     /** Feed this the effective model of every provider whenever settings change; changed models invalidate that provider. */
-    fun onModelsObserved(models: Map<AiProvider, String>) {
+    fun onModelsObserved(models: Map<ProviderId, String>) {
         val before = synchronized(lock) { lastModels.also { lastModels = models } } ?: return
         for ((provider, model) in models) if (before[provider] != model) invalidate(provider)
     }
 
     // ------------------------------------------------------------------ availability check (no generation)
 
-    fun checkAvailability(provider: AiProvider): Boolean = start(provider, TestKind.AVAILABILITY) { epoch ->
+    fun checkAvailability(provider: ProviderId): Boolean = start(provider, TestKind.AVAILABILITY) { epoch ->
         publish(provider, epoch) { it.copy(availability = AvailabilityState.Running) }
         val result: AvailabilityState = try {
             val (go, why) = preflight(provider)
             if (go == null) {
                 AvailabilityState.Failed(why ?: "Not ready.", null)
             } else {
-                val info = diagnosticsFor(provider).checkModel(go.target.apiKey, go.target.model)
-                AvailabilityState.Ok(provider.label, go.target.model, info.displayName, info.canGenerate)
+                val info = diagnosticsFor(go.builtIn).checkModel(go.target.apiKey, go.target.model)
+                AvailabilityState.Ok(labelOf(provider), go.target.model, info.displayName, info.canGenerate)
             }
         } catch (e: LlmException) {
             AvailabilityState.Failed(ErrorMessages.of(e.error), FailureFormatter.details(e.context, 1))
@@ -180,7 +192,7 @@ class ConnectionTester(
 
     // ------------------------------------------------------------------ generation test (uses quota)
 
-    fun runTest(provider: AiProvider, prompt: String): Boolean = start(provider, TestKind.GENERATION) { epoch ->
+    fun runTest(provider: ProviderId, prompt: String): Boolean = start(provider, TestKind.GENERATION) { epoch ->
         publish(provider, epoch) { it.copy(generation = TestState.Running("", null)) }
         var retries = 0
         val result: TestState = try {
@@ -217,13 +229,13 @@ class ConnectionTester(
                         reply.append(chunk)
                         publish(provider, epoch) { it.copy(generation = TestState.Running(reply.toString(), null)) }
                     }
-                    TestState.Done(reply.toString(), clock() - started, provider.label, go.target.model, retries + 1)
+                    TestState.Done(reply.toString(), clock() - started, labelOf(provider), go.target.model, retries + 1)
                 }
             }
         } catch (e: LlmException) {
             val tries = retries + 1
             val suffix = if (retries > 0) " I tried $tries times." else ""
-            val offer = e.error is LlmError.Overloaded && retries >= maxRetries && provider == AiProvider.GEMINI
+            val offer = e.error is LlmError.Overloaded && retries >= maxRetries && provider == AiProvider.GEMINI.toId()
             TestState.Failed(ErrorMessages.of(e.error) + suffix, FailureFormatter.details(e.context, tries), offer)
         } catch (e: CancellationException) {
             throw e
@@ -235,7 +247,7 @@ class ConnectionTester(
 
     // ------------------------------------------------------------------ diagnostics run (uses up to 2 generation calls)
 
-    fun runDiagnostics(provider: AiProvider): Boolean = start(provider, TestKind.DIAGNOSTICS) { epoch ->
+    fun runDiagnostics(provider: ProviderId): Boolean = start(provider, TestKind.DIAGNOSTICS) { epoch ->
         fun step(text: String) = publish(provider, epoch) { it.copy(diagnostics = DiagState.Running(text)) }
         step("Preparing...")
         val result: DiagState = try {
@@ -243,7 +255,7 @@ class ConnectionTester(
             if (go == null) {
                 DiagState.Failed(why ?: "Not ready.")
             } else {
-                val tools = diagnosticsFor(provider)
+                val tools = diagnosticsFor(go.builtIn)
                 val target = go.target
 
                 // Step 1: no generation, no generation quota.
@@ -286,7 +298,7 @@ class ConnectionTester(
                 }
                 DiagState.Done(
                     DiagnosticsVerdict.lines(check, stream, once),
-                    DiagnosticsVerdict.verdict(check, stream, once, provider.label),
+                    DiagnosticsVerdict.verdict(check, stream, once, labelOf(provider)),
                 )
             }
         } catch (e: CancellationException) {

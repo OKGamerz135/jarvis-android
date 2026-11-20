@@ -7,6 +7,8 @@ import dev.jarvis.assistant.chat.ProviderSource
 import dev.jarvis.assistant.chat.Resolved
 import dev.jarvis.assistant.diag.CallKind
 import dev.jarvis.assistant.diag.DiagnosticEntry
+import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -48,6 +50,7 @@ class ConnectionTesterTest {
         @Volatile var gate: CompletableDeferred<Unit>? = null     // when set, checkModel waits for it
         @Volatile var streamFailure: LlmException? = null
         @Volatile var canGenerate = true
+        @Volatile var ignoresCancellation = false                 // models work that keeps running after the check is stopped
 
         override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow {
             streamRequests += request
@@ -57,7 +60,7 @@ class ConnectionTesterTest {
 
         override suspend fun checkModel(apiKey: String, model: String): ModelInfo {
             checks += apiKey to model
-            gate?.await()
+            if (ignoresCancellation) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate?.await() } else gate?.await()
             return ModelInfo(model, "name-of-$model", if (canGenerate) listOf("chat.completions") else emptyList())
         }
 
@@ -92,8 +95,11 @@ class ConnectionTesterTest {
     private var now = 10_000_000L
 
     private fun tester() = ConnectionTester(
-        scope, source, { adapters.getValue(it) }, { entries }, clock = { now },
+        scope, source, ::labelOf, { adapters.getValue(it) }, { entries }, clock = { now },
     )
+
+    private val registry = ProviderRegistry.withBuiltIns()
+    private fun labelOf(id: dev.jarvis.assistant.providers.ProviderId) = registry.get(id)?.label ?: id.value
 
     private suspend fun ConnectionTester.settled() = withTimeout(5000) { active.first { it == null } }
 
@@ -106,12 +112,12 @@ class ConnectionTesterTest {
     @Test fun availabilityChecksTheScreenProviderNotThePreferredOne() = runBlocking {
         source.preferred = C
         val t = tester()
-        assertTrue(t.checkAvailability(Q)); t.settled()
+        assertTrue(t.checkAvailability(Q.toId())); t.settled()
         assertEquals(listOf<AiProvider?>(Q), source.resolved)
         assertEquals(listOf("KEY-GROQ" to "model-GROQ"), adapters.getValue(Q).checks)
         assertTrue(adapters.getValue(C).checks.isEmpty())
         assertTrue(adapters.getValue(G).checks.isEmpty())
-        val ok = t.stateOf(Q).availability as AvailabilityState.Ok
+        val ok = t.stateOf(Q.toId()).availability as AvailabilityState.Ok
         assertEquals("Groq", ok.provider)
         assertEquals("model-GROQ", ok.model)
     }
@@ -119,7 +125,7 @@ class ConnectionTesterTest {
     @Test fun generationTestUsesTheScreenProvidersAdapterKeyModelAndPrompt() = runBlocking {
         source.preferred = C
         val t = tester()
-        assertTrue(t.runTest(G, "say hi")); t.settled()
+        assertTrue(t.runTest(G.toId(), "say hi")); t.settled()
         val sent = adapters.getValue(G).streamRequests.single()
         assertEquals("KEY-GEMINI", sent.apiKey)
         assertEquals("model-GEMINI", sent.model)
@@ -127,7 +133,7 @@ class ConnectionTesterTest {
         assertEquals("say hi", sent.messages.single().text)
         assertTrue(adapters.getValue(C).streamRequests.isEmpty())
         assertTrue(adapters.getValue(Q).streamRequests.isEmpty())
-        val done = t.stateOf(G).generation as TestState.Done
+        val done = t.stateOf(G.toId()).generation as TestState.Done
         assertEquals("hello from Google Gemini", done.text)
         assertEquals("Google Gemini", done.provider)
         assertEquals("model-GEMINI", done.model)
@@ -136,11 +142,11 @@ class ConnectionTesterTest {
     @Test fun diagnosticsUseTheScreenProvider() = runBlocking {
         source.preferred = C
         val t = tester()
-        assertTrue(t.runDiagnostics(Q)); t.settled()
+        assertTrue(t.runDiagnostics(Q.toId())); t.settled()
         assertEquals(listOf("KEY-GROQ" to "model-GROQ"), adapters.getValue(Q).checks)
         assertEquals(1, adapters.getValue(Q).streamRequests.size)
         assertTrue(adapters.getValue(C).checks.isEmpty() && adapters.getValue(C).streamRequests.isEmpty())
-        val done = t.stateOf(Q).diagnostics as DiagState.Done
+        val done = t.stateOf(Q.toId()).diagnostics as DiagState.Done
         assertTrue("verdict names the tested provider: ${done.verdict}", done.verdict.contains("Groq"))
         assertFalse(done.verdict.contains("Cloudflare"))
     }
@@ -149,7 +155,7 @@ class ConnectionTesterTest {
         source.preferred = C
         adapters.getValue(Q).streamFailure = LlmException(LlmError.Overloaded("busy"))
         val t = tester()
-        t.runDiagnostics(Q); t.settled()
+        t.runDiagnostics(Q.toId()); t.settled()
         assertEquals(1, adapters.getValue(Q).once.get())
         assertEquals(0, adapters.getValue(C).once.get())
     }
@@ -158,12 +164,12 @@ class ConnectionTesterTest {
         source.preferred = C
         source.withoutKey = setOf(Q)
         val t = tester()
-        t.checkAvailability(Q); t.settled()
-        t.runTest(Q, "x"); t.settled()
-        t.runDiagnostics(Q); t.settled()
-        assertTrue((t.stateOf(Q).availability as AvailabilityState.Failed).message.contains("Groq is not configured"))
-        assertTrue((t.stateOf(Q).generation as TestState.Failed).message.contains("Groq is not configured"))
-        assertTrue((t.stateOf(Q).diagnostics as DiagState.Failed).message.contains("Groq is not configured"))
+        t.checkAvailability(Q.toId()); t.settled()
+        t.runTest(Q.toId(), "x"); t.settled()
+        t.runDiagnostics(Q.toId()); t.settled()
+        assertTrue((t.stateOf(Q.toId()).availability as AvailabilityState.Failed).message.contains("Groq is not configured"))
+        assertTrue((t.stateOf(Q.toId()).generation as TestState.Failed).message.contains("Groq is not configured"))
+        assertTrue((t.stateOf(Q.toId()).diagnostics as DiagState.Failed).message.contains("Groq is not configured"))
         // nothing at all was sent to any adapter, in particular not to the preferred provider
         assertTrue(adapters.values.all { it.checks.isEmpty() && it.streamRequests.isEmpty() })
     }
@@ -171,8 +177,8 @@ class ConnectionTesterTest {
     @Test fun aResolverThatAnswersForAnotherProviderIsRefusedAndNothingIsSent() = runBlocking {
         source.lie = C
         val t = tester()
-        t.runTest(Q, "x"); t.settled()
-        val failed = t.stateOf(Q).generation as TestState.Failed
+        t.runTest(Q.toId(), "x"); t.settled()
+        val failed = t.stateOf(Q.toId()).generation as TestState.Failed
         assertTrue(failed.message, failed.message.contains("Internal error"))
         assertTrue(adapters.values.all { it.streamRequests.isEmpty() })
     }
@@ -180,36 +186,36 @@ class ConnectionTesterTest {
     @Test fun cooldownOfOneProviderDoesNotBlockAnother() = runBlocking {
         entries = listOf(entry(Q, now - 5_000))
         val t = tester()
-        t.runTest(Q, "x"); t.settled()
-        assertTrue((t.stateOf(Q).generation as TestState.Failed).message.startsWith("Wait "))
+        t.runTest(Q.toId(), "x"); t.settled()
+        assertTrue((t.stateOf(Q.toId()).generation as TestState.Failed).message.startsWith("Wait "))
         assertTrue(adapters.getValue(Q).streamRequests.isEmpty())
-        t.runTest(C, "x"); t.settled()
-        assertTrue(t.stateOf(C).generation is TestState.Done)
+        t.runTest(C.toId(), "x"); t.settled()
+        assertTrue(t.stateOf(C.toId()).generation is TestState.Done)
     }
 
     @Test fun overloadedGeminiOffersTheAlternativeButOtherProvidersDoNot() = runBlocking {
         adapters.getValue(G).streamFailure = LlmException(LlmError.Overloaded("busy"))
         adapters.getValue(Q).streamFailure = LlmException(LlmError.Overloaded("busy"))
         // maxRetries is counted by the adapters themselves; here the fake never retries, so use maxRetries = 0
-        val t = ConnectionTester(scope, source, { adapters.getValue(it) }, { entries }, clock = { now }, maxRetries = 0)
-        t.runTest(G, "x"); t.settled()
-        t.runTest(Q, "x"); t.settled()
-        assertTrue((t.stateOf(G).generation as TestState.Failed).offerAlternative)
-        assertFalse((t.stateOf(Q).generation as TestState.Failed).offerAlternative)
+        val t = ConnectionTester(scope, source, ::labelOf, { adapters.getValue(it) }, { entries }, clock = { now }, maxRetries = 0)
+        t.runTest(G.toId(), "x"); t.settled()
+        t.runTest(Q.toId(), "x"); t.settled()
+        assertTrue((t.stateOf(G.toId()).generation as TestState.Failed).offerAlternative)
+        assertFalse((t.stateOf(Q.toId()).generation as TestState.Failed).offerAlternative)
     }
 
     // ------------------------------------------------------------------ C-02: results stay with their provider
 
     @Test fun resultsAreKeptPerProviderAndNeverShownForAnother() = runBlocking {
         val t = tester()
-        t.checkAvailability(Q); t.settled()
-        assertTrue(t.stateOf(Q).availability is AvailabilityState.Ok)
-        assertEquals(ProviderTestState(), t.stateOf(G))
-        assertEquals(ProviderTestState(), t.stateOf(C))
-        t.runTest(G, "x"); t.settled()
-        assertTrue(t.stateOf(G).generation is TestState.Done)
-        assertEquals(TestState.Idle, t.stateOf(Q).generation)   // Groq's generation slot is untouched by Gemini's test
-        assertTrue(t.stateOf(Q).availability is AvailabilityState.Ok) // and Groq's earlier result is still there
+        t.checkAvailability(Q.toId()); t.settled()
+        assertTrue(t.stateOf(Q.toId()).availability is AvailabilityState.Ok)
+        assertEquals(ProviderTestState(), t.stateOf(G.toId()))
+        assertEquals(ProviderTestState(), t.stateOf(C.toId()))
+        t.runTest(G.toId(), "x"); t.settled()
+        assertTrue(t.stateOf(G.toId()).generation is TestState.Done)
+        assertEquals(TestState.Idle, t.stateOf(Q.toId()).generation)   // Groq's generation slot is untouched by Gemini's test
+        assertTrue(t.stateOf(Q.toId()).availability is AvailabilityState.Ok) // and Groq's earlier result is still there
     }
 
     // ------------------------------------------------------------------ D1: one check at a time
@@ -218,70 +224,147 @@ class ConnectionTesterTest {
         val gate = CompletableDeferred<Unit>()
         adapters.getValue(Q).gate = gate
         val t = tester()
-        assertTrue(t.checkAvailability(Q))
+        assertTrue(t.checkAvailability(Q.toId()))
         withTimeout(5000) { while (adapters.getValue(Q).checks.isEmpty()) kotlinx.coroutines.delay(5) }
-        assertEquals(ActiveTest(Q, TestKind.AVAILABILITY), t.active.value)
-        assertTrue(t.stateOf(Q).availability is AvailabilityState.Running)
+        assertEquals(ActiveTest(Q.toId(), TestKind.AVAILABILITY), t.active.value)
+        assertTrue(t.stateOf(Q.toId()).availability is AvailabilityState.Running)
 
-        assertFalse("another provider", t.runTest(G, "x"))
-        assertFalse("same provider, other check", t.runDiagnostics(Q))
-        assertFalse("same check again", t.checkAvailability(Q))
+        assertFalse("another provider", t.runTest(G.toId(), "x"))
+        assertFalse("same provider, other check", t.runDiagnostics(Q.toId()))
+        assertFalse("same check again", t.checkAvailability(Q.toId()))
         assertEquals("refused calls must not even resolve a provider", listOf<AiProvider?>(Q), source.resolved)
-        assertEquals(ProviderTestState(), t.stateOf(G))
+        assertEquals(ProviderTestState(), t.stateOf(G.toId()))
 
         gate.complete(Unit); t.settled()
-        assertTrue(t.stateOf(Q).availability is AvailabilityState.Ok)
-        assertTrue("free again", t.runTest(G, "x")); t.settled()
-        assertTrue(t.stateOf(G).generation is TestState.Done)
+        assertTrue(t.stateOf(Q.toId()).availability is AvailabilityState.Ok)
+        assertTrue("free again", t.runTest(G.toId(), "x")); t.settled()
+        assertTrue(t.stateOf(G.toId()).generation is TestState.Done)
     }
 
     // ------------------------------------------------------------------ D2: a changed key or model makes results stale
 
     @Test fun changedKeyDropsThatProvidersResultsOnly() = runBlocking {
         val t = tester()
-        t.checkAvailability(Q); t.settled(); t.checkAvailability(G); t.settled()
-        t.invalidate(Q)
-        assertEquals(ProviderTestState(), t.stateOf(Q))
-        assertTrue(t.stateOf(G).availability is AvailabilityState.Ok)
+        t.checkAvailability(Q.toId()); t.settled(); t.checkAvailability(G.toId()); t.settled()
+        t.invalidate(Q.toId())
+        assertEquals(ProviderTestState(), t.stateOf(Q.toId()))
+        assertTrue(t.stateOf(G.toId()).availability is AvailabilityState.Ok)
     }
 
     @Test fun invalidateWhileRunningStopsTheCheckAndNoLateResultAppears() = runBlocking {
         val gate = CompletableDeferred<Unit>()
         adapters.getValue(Q).gate = gate
         val t = tester()
-        t.checkAvailability(Q)
+        t.checkAvailability(Q.toId())
         withTimeout(5000) { while (adapters.getValue(Q).checks.isEmpty()) kotlinx.coroutines.delay(5) }
-        t.invalidate(Q)
+        t.invalidate(Q.toId())
         t.settled()
         gate.complete(Unit)
         kotlinx.coroutines.delay(100)
-        assertEquals(ProviderTestState(), t.stateOf(Q))
+        assertEquals(ProviderTestState(), t.stateOf(Q.toId()))
         assertNull(t.active.value)
         // and a fresh check afterwards works and is tied to the new configuration
         adapters.getValue(Q).gate = null
-        assertTrue(t.checkAvailability(Q)); t.settled()
-        assertTrue(t.stateOf(Q).availability is AvailabilityState.Ok)
+        assertTrue(t.checkAvailability(Q.toId())); t.settled()
+        assertTrue(t.stateOf(Q.toId()).availability is AvailabilityState.Ok)
     }
 
     @Test fun changedModelDropsOnlyTheProviderWhoseModelChanged() = runBlocking {
         val t = tester()
-        val before = AiProvider.entries.associateWith { "model-${it.name}" }
+        val before = AiProvider.entries.associate { it.toId() to "model-${it.name}" }
         t.onModelsObserved(before)                       // first look: nothing to compare with, nothing dropped
-        t.checkAvailability(Q); t.settled(); t.checkAvailability(G); t.settled()
+        t.checkAvailability(Q.toId()); t.settled(); t.checkAvailability(G.toId()); t.settled()
         t.onModelsObserved(before)                       // unchanged: results stay
-        assertTrue(t.stateOf(Q).availability is AvailabilityState.Ok)
-        t.onModelsObserved(before + (Q to "another-model"))
-        assertEquals(ProviderTestState(), t.stateOf(Q))
-        assertTrue(t.stateOf(G).availability is AvailabilityState.Ok)
+        assertTrue(t.stateOf(Q.toId()).availability is AvailabilityState.Ok)
+        t.onModelsObserved(before + (Q.toId() to "another-model"))
+        assertEquals(ProviderTestState(), t.stateOf(Q.toId()))
+        assertTrue(t.stateOf(G.toId()).availability is AvailabilityState.Ok)
     }
 
     @Test fun afterAModelChangeTheNextCheckUsesTheNewModel() = runBlocking {
         val t = tester()
-        t.checkAvailability(Q); t.settled()
+        t.checkAvailability(Q.toId()); t.settled()
         source.models[Q] = "new-model"
-        t.invalidate(Q)
-        t.checkAvailability(Q); t.settled()
-        assertEquals("new-model", (t.stateOf(Q).availability as AvailabilityState.Ok).model)
+        t.invalidate(Q.toId())
+        t.checkAvailability(Q.toId()); t.settled()
+        assertEquals("new-model", (t.stateOf(Q.toId()).availability as AvailabilityState.Ok).model)
         assertEquals(listOf("model-GROQ", "new-model"), adapters.getValue(Q).checks.map { it.second })
+    }
+
+    // ------------------------------------------------------------------ C2c: results are keyed by ProviderId
+
+    @Test fun anIdThatIsNotABuiltInProviderIsRefusedBeforeAnythingIsResolvedOrSent() = runBlocking {
+        val stranger = dev.jarvis.assistant.providers.ProviderId.newCustom()
+        val t = tester()
+        t.checkAvailability(stranger); t.settled()
+        t.runTest(stranger, "x"); t.settled()
+        t.runDiagnostics(stranger); t.settled()
+        assertTrue(source.resolved.isEmpty())
+        assertTrue(adapters.values.all { it.checks.isEmpty() && it.streamRequests.isEmpty() && it.once.get() == 0 })
+        assertTrue(t.stateOf(stranger).availability is AvailabilityState.Failed)
+        assertTrue(t.stateOf(stranger).generation is TestState.Failed)
+        assertTrue(t.stateOf(stranger).diagnostics is DiagState.Failed)
+        // and no built-in provider picked up a result for it
+        for (p in AiProvider.entries) assertEquals(ProviderTestState(), t.stateOf(p.toId()))
+    }
+
+    @Test fun invalidatingOneIdNeverBumpsAnotherIdsEpochOrState() = runBlocking {
+        val t = tester()
+        t.checkAvailability(G.toId()); t.settled()
+        t.invalidate(dev.jarvis.assistant.providers.ProviderId.newCustom())
+        t.invalidate(Q.toId())
+        assertTrue(t.stateOf(G.toId()).availability is AvailabilityState.Ok)
+    }
+
+    @Test fun anAvailabilityCheckAloneIsAcceptedNotPassedAndOnlyAGenerationReplyPasses() = runBlocking {
+        val t = tester()
+        t.checkAvailability(Q.toId()); t.settled()
+        assertEquals(
+            dev.jarvis.assistant.providers.TestStatus.ACCEPTED,
+            dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())),
+        )
+        t.runTest(Q.toId(), "x"); t.settled()
+        assertEquals(
+            dev.jarvis.assistant.providers.TestStatus.PASSED,
+            dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())),
+        )
+        // the other providers are still untested
+        assertEquals(
+            dev.jarvis.assistant.providers.TestStatus.NOT_TESTED,
+            dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(G.toId())),
+        )
+    }
+
+    @Test fun aKeyChangeInvalidatesPassedBackToNotTestedAndANewRunIsNeeded() = runBlocking {
+        val t = tester()
+        t.runTest(Q.toId(), "x"); t.settled()
+        t.invalidate(Q.toId())
+        assertEquals(
+            dev.jarvis.assistant.providers.TestStatus.NOT_TESTED,
+            dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())),
+        )
+    }
+
+    @Test fun theActiveTestNamesTheProviderIdBeingTested() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        adapters.getValue(C).gate = gate
+        val t = tester()
+        t.checkAvailability(C.toId())
+        withTimeout(5000) { while (adapters.getValue(C).checks.isEmpty()) kotlinx.coroutines.delay(5) }
+        assertEquals(C.toId(), t.active.value?.provider)
+        gate.complete(Unit); t.settled(); Unit
+    }
+
+    @Test fun aResultThatArrivesAfterTheKeyChangedIsDiscardedEvenWhenTheStoppedCheckKeepsRunning() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        adapters.getValue(Q).gate = gate
+        adapters.getValue(Q).ignoresCancellation = true
+        val t = tester()
+        t.checkAvailability(Q.toId())
+        withTimeout(5000) { while (adapters.getValue(Q).checks.isEmpty()) kotlinx.coroutines.delay(5) }
+        t.invalidate(Q.toId())          // the key changed while the check was in flight
+        gate.complete(Unit)             // the old check now finishes anyway, with the OLD key's answer
+        kotlinx.coroutines.delay(200)
+        assertEquals("a stale result must never be shown", ProviderTestState(), t.stateOf(Q.toId()))
     }
 }
