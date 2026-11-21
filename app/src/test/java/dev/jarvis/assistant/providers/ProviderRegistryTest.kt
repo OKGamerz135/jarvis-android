@@ -303,4 +303,104 @@ class ProviderRegistryTest {
         assertEquals(ProviderLabels.normalize("a b"), ProviderLabels.normalize("A\u00A0\u00A0 B"))
         assertTrue(ProviderLabels.normalize("Groq") != ProviderLabels.normalize("Groq2"))
     }
+
+    // ------------------------------------------------------------------ C3-pre review fix: invisible fillers inside visible labels
+
+    /** Characters the label policy calls invisible that are NOT Unicode "format" characters: fillers and blank glyphs. */
+    private val fillers = listOf("\u115F", "\u1160", "\u2800", "\u3164", "\uFFA0", "\u17B4", "\u17B5", "\u034F", "\uFE0F", "\u180B")
+
+    @Test fun aFillerInsideAVisibleLabelCannotDisguiseADuplicateOfABuiltIn() {
+        for (f in fillers) for (l in listOf("Gro${f}q", "${f}Groq", "Groq$f", "G${f}${f}r${f}o${f}q", "Google${f} Gemini", "Google $f Gemini")) {
+            val r = ProviderRegistry.withBuiltIns()
+            val result = r.register(custom(l))
+            assertTrue("'${l.map { it.code.toString(16) }}' gave $result", result is RegisterResult.LabelInUse)
+            assertTrue(r.custom().isEmpty())
+        }
+    }
+
+    @Test fun aFillerInsideAVisibleLabelCannotDisguiseADuplicateOfACustomProvider() {
+        for (f in fillers) {
+            val r = registryWith("Home server")
+            val first = r.custom().single()
+            for (l in listOf("Home${f} server", "Home ${f} server", "${f}Home server${f}", "H${f}ome${f} s${f}erver")) {
+                assertEquals("'${l.map { it.code.toString(16) }}'", RegisterResult.LabelInUse(first.id), r.register(custom(l)))
+            }
+            assertEquals(listOf(first), r.custom())
+        }
+    }
+
+    @Test fun normalizationLeavesNoInvisibleCharacterBehindForAnyCodePoint() {
+        // Policy consistency, over every code point: anything the label policy calls invisible must vanish from the
+        // comparison form (or become a plain space, for whitespace), so it can never make a duplicate look different.
+        var invisible = 0
+        var cp = 0
+        while (cp <= 0x10FFFF) {
+            if (cp !in 0xD800..0xDFFF) {
+                val one = String(Character.toChars(cp))
+                if (!ProviderLabels.hasVisibleCharacter(one)) {
+                    invisible++
+                    val key = ProviderLabels.normalize("Gro${one}q")
+                    assertTrue("U+%04X left '%s'".format(cp, key.map { it.code.toString(16) }), key == "groq" || key == "gro q")
+                }
+            }
+            cp++
+        }
+        assertTrue(invisible > 100)
+    }
+
+    @Test fun legitimateCharactersAreNotStrippedFromTheComparisonForm() {
+        // Real Hangul, CJK, accents, non-blank Braille and plain emoji must still count, or distinct labels would collide.
+        assertEquals("\uD55C\uAD6D", ProviderLabels.normalize("\uD55C\uAD6D"))
+        assertEquals("\u5BB6\u5EAD", ProviderLabels.normalize("\u5BB6\u5EAD"))
+        assertEquals("caf\u00E9", ProviderLabels.normalize("Cafe\u0301"))
+        assertEquals("\u2801", ProviderLabels.normalize("\u2801"))
+        assertEquals("\u1100", ProviderLabels.normalize("\u1100"))
+        assertEquals("\uD83D\uDE00", ProviderLabels.normalize("\uD83D\uDE00"))
+        assertTrue(ProviderLabels.normalize("\u5BB6") != ProviderLabels.normalize("\u5BB6\u5EAD"))
+        assertTrue(ProviderLabels.normalize("\u2801") != ProviderLabels.normalize("\u2802"))
+    }
+
+    @Test fun fullWidthAndWhitespaceFormsStillCollideAndRealDifferencesDoNot() {
+        assertEquals(ProviderLabels.normalize("Groq"), ProviderLabels.normalize("\uFF27\uFF52\uFF4F\uFF51"))
+        assertEquals("home server", ProviderLabels.normalize("  Home \t\u00A0 Server \n"))
+        assertTrue(ProviderLabels.normalize("Home server") != ProviderLabels.normalize("Homeserver"))
+        assertTrue(ProviderLabels.normalize("Groq") != ProviderLabels.normalize("Groq 2"))
+    }
+
+    @Test fun fillerOnlyAndFillerPlusWhitespaceLabelsAreRejectedButVisibleOnesWithFillersAreNot() {
+        for (f in fillers) {
+            for (l in listOf(f, " $f ", "$f$f", "\u200B$f")) {
+                try { custom(l); fail("accepted '${l.map { it.code.toString(16) }}'") } catch (e: IllegalArgumentException) { }
+            }
+            assertEquals("A${f}B", custom("A${f}B").label) // a visible label is accepted; only its comparison form drops the filler
+        }
+        assertEquals("\uD83D\uDE00\uFE0F", custom("\uD83D\uDE00\uFE0F").label)
+    }
+
+    @Test fun aBlankGlyphStandingInForASpaceCollidesWithTheSpacedLabelButRealWhitespaceDoesNot() {
+        val r = registryWith("Home server")
+        val first = r.custom().single()
+        for (g in listOf("\u115F", "\u1160", "\u2800", "\u3164", "\uFFA0")) {
+            assertEquals(RegisterResult.LabelInUse(first.id), r.register(custom("Home${g}server")))
+            assertEquals(RegisterResult.LabelInUse(AiProvider.GROQ.toId()), ProviderRegistry.withBuiltIns().register(custom("Gro${g}q")))
+            assertEquals(RegisterResult.LabelInUse(AiProvider.GEMINI.toId()), ProviderRegistry.withBuiltIns().register(custom("Google${g}Gemini")))
+        }
+        assertEquals(RegisterResult.Added, r.register(custom("Homeserver")))
+        assertEquals(listOf(first), r.custom().take(1))
+    }
+
+    @Test fun comparisonKeysAlwaysIncludeTheCanonicalForm() {
+        for (l in listOf("Groq", " Home\u3164server ", "A\u200BB", "\uFF27\uFF52")) assertTrue(ProviderLabels.normalize(l) in ProviderLabels.comparisonKeys(l))
+    }
+
+    @Test fun theCollisionIsDetectedWhicheverLabelWasRegisteredFirst() {
+        for (g in listOf("\u115F", "\u1160", "\u2800", "\u3164", "\uFFA0")) {
+            val r = ProviderRegistry.withBuiltIns()
+            assertEquals(RegisterResult.Added, r.register(custom("Home${g}server")))
+            val first = r.custom().single()
+            assertEquals(RegisterResult.LabelInUse(first.id), r.register(custom("Home server")))
+            assertEquals(RegisterResult.LabelInUse(first.id), r.register(custom("HOME  SERVER")))
+            assertEquals(listOf(first), r.custom())
+        }
+    }
 }

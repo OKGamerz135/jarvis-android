@@ -15,7 +15,7 @@ sealed interface RegisterResult {
     data class KeyNameInUse(val usedBy: ProviderId) : RegisterResult
 
     /**
-     * Another provider already has this label (compared after [ProviderLabels.normalize]: case, spacing and invisible
+     * Another provider already has this label (compared after [ProviderLabels.comparisonKeys]: case, spacing and invisible
      * characters do not make a different label). Diagnostics, cooldown and usage are matched on the label, so two
      * providers sharing one would share that state.
      */
@@ -44,8 +44,8 @@ class ProviderRegistry private constructor() {
     fun register(descriptor: ProviderDescriptor): RegisterResult = synchronized(lock) {
         entries[descriptor.id]?.let { return RegisterResult.AlreadyRegistered(it) }
         entries.values.firstOrNull { it.keyName == descriptor.keyName }?.let { return RegisterResult.KeyNameInUse(it.id) }
-        val wanted = ProviderLabels.normalize(descriptor.label)
-        entries.values.firstOrNull { ProviderLabels.normalize(it.label) == wanted }?.let { return RegisterResult.LabelInUse(it.id) }
+        val wanted = ProviderLabels.comparisonKeys(descriptor.label)
+        entries.values.firstOrNull { other -> ProviderLabels.comparisonKeys(other.label).any { it in wanted } }?.let { return RegisterResult.LabelInUse(it.id) }
         entries[descriptor.id] = descriptor
         RegisterResult.Added
     }
