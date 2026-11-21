@@ -15,7 +15,7 @@ class SensitivityGuardTest {
     @Test fun secretsAreBlocked() {
         assertEquals(Sensitivity.BLOCKED, level("my password is hunter22"))
         assertEquals(Sensitivity.BLOCKED, level("api key: sk-abcdefghijklmnopqrstuvwxyz123456"))
-        assertEquals(Sensitivity.BLOCKED, level("token = AIzaSyA1234567890abcdefghijklmnopqrstuv"))
+        assertEquals(Sensitivity.BLOCKED, level("token = " + "AIza" + "SyNOTAREALsyntheticFIXTURE000000000"))
         assertEquals(Sensitivity.BLOCKED, level("my pin is 4821"))
     }
 

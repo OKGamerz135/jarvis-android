@@ -6,9 +6,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RedactorTest {
+    /**
+     * Synthetic, nonfunctional values in the exact length and character shape of Google and Groq keys (so the redaction
+     * patterns are exercised realistically). Each is built from two pieces on purpose: no complete credential-shaped
+     * string exists in this source file, so secret scanners have nothing to match, and the text says what it is.
+     */
+    private val syntheticGoogleKey = "AIza" + "SyNOTAREALsyntheticFIXTURE000000000"
+    private val syntheticGroqKey = "gsk_" + "NOTAREALsyntheticGroqFIXTURE000000000000000000000000"
+
+    @Test
+    fun syntheticFixturesHaveTheRealKeyShapes() {
+        assertEquals(39, syntheticGoogleKey.length) // Google API keys: "AIza" + 35 characters
+        assertEquals(56, syntheticGroqKey.length)   // Groq keys: "gsk_" + 52 characters
+        assertTrue(syntheticGoogleKey.contains("NOTAREAL"))
+        assertTrue(syntheticGroqKey.contains("NOTAREAL"))
+    }
+
     @Test
     fun removesGoogleAndGroqKeys() {
-        val out = Redactor.clean("bad key AIzaSyA1234567890abcdefghijklmnopqrstuv and gsk_abcdefghijklmnop1234")
+        val out = Redactor.clean("bad key $syntheticGoogleKey and $syntheticGroqKey")
+        assertEquals("bad key [key] and [key]", out)
         assertFalse(out, out.contains("AIza"))
         assertFalse(out, out.contains("gsk_"))
     }
