@@ -13,6 +13,13 @@ sealed interface RegisterResult {
 
     /** Another provider already uses this key name, so the new one would read that provider's saved key. */
     data class KeyNameInUse(val usedBy: ProviderId) : RegisterResult
+
+    /**
+     * Another provider already has this label (compared after [ProviderLabels.normalize]: case, spacing and invisible
+     * characters do not make a different label). Diagnostics, cooldown and usage are matched on the label, so two
+     * providers sharing one would share that state.
+     */
+    data class LabelInUse(val usedBy: ProviderId) : RegisterResult
 }
 
 /** The outcome of [ProviderRegistry.remove]. */
@@ -33,10 +40,12 @@ class ProviderRegistry private constructor() {
         for (p in AiProvider.entries) entries[p.toId()] = ProviderDescriptor.of(p)
     }
 
-    /** Adds a provider. Refuses, without changing anything, an id that is already registered or a key name already in use. */
+    /** Adds a provider. Refuses, without changing anything, an id that is already registered, a key name or a label already in use (checked in that order). */
     fun register(descriptor: ProviderDescriptor): RegisterResult = synchronized(lock) {
         entries[descriptor.id]?.let { return RegisterResult.AlreadyRegistered(it) }
         entries.values.firstOrNull { it.keyName == descriptor.keyName }?.let { return RegisterResult.KeyNameInUse(it.id) }
+        val wanted = ProviderLabels.normalize(descriptor.label)
+        entries.values.firstOrNull { ProviderLabels.normalize(it.label) == wanted }?.let { return RegisterResult.LabelInUse(it.id) }
         entries[descriptor.id] = descriptor
         RegisterResult.Added
     }

@@ -129,7 +129,15 @@ object DiagnosticsFormat {
     }
 }
 
-/** Keeps free-tier usage low: a pause between generation calls, and a count so you can see what was used. */
+/**
+ * Keeps free-tier usage low: a pause between generation calls, and a count so you can see what was used.
+ *
+ * Records are matched on the provider's display LABEL. [dev.jarvis.assistant.providers.ProviderRegistry] therefore refuses
+ * two providers with the same normalized label, which keeps the five built-in providers apart. Known residual risk: if a
+ * custom provider is removed and another later takes its label, the old entries would count for the new one (and a rename
+ * would orphan the history). MANDATORY before custom providers can run (C4): key usage and cooldown records by ProviderId,
+ * and make removing a custom provider delete only that provider's records (by id, never by label).
+ */
 object UsageGuard {
     const val COOLDOWN_MS = 60_000L
     const val DAY_MS = 24L * 60 * 60 * 1000

@@ -22,6 +22,7 @@ data class ProviderDescriptor(
 ) {
     init {
         require(label.isNotBlank()) { "A provider needs a label." }
+        require(ProviderLabels.hasVisibleCharacter(label)) { "A provider's label needs at least one visible character." }
         require(keyName.isNotBlank()) { "A provider needs a key name." }
     }
 

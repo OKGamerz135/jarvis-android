@@ -235,4 +235,72 @@ class ProviderRegistryTest {
             for (d in own) assertSame("round $round", d, registry.get(d.id))
         }
     }
+
+    // ------------------------------------------------------------------ C3-pre: label uniqueness
+
+    private fun registryWith(vararg labels: String): ProviderRegistry {
+        val r = ProviderRegistry.withBuiltIns()
+        for (l in labels) assertEquals(RegisterResult.Added, r.register(custom(l)))
+        return r
+    }
+
+    @Test fun aLabelThatMatchesABuiltInIsRefusedHoweverItIsSpelled() {
+        for (l in listOf("Groq", "groq", " GROQ ", "G r o q".replace(" ", ""), "Google  Gemini", "google gemini", "\uFF27roq", "Gro\u200Bq", "Z.ai\tGLM", "cloudflare   workers ai")) {
+            val r = ProviderRegistry.withBuiltIns()
+            val result = r.register(custom(l))
+            assertTrue("'$l' gave $result", result is RegisterResult.LabelInUse)
+            assertTrue(r.custom().isEmpty())
+        }
+        assertEquals(RegisterResult.LabelInUse(AiProvider.GROQ.toId()), ProviderRegistry.withBuiltIns().register(custom("  gRoQ")))
+    }
+
+    @Test fun aLabelThatMatchesACustomOneIsRefusedAndNothingChanges() {
+        val r = registryWith("Home server")
+        val first = r.custom().single()
+        for (l in listOf("home server", "HOME  SERVER", " Home server ", "Home\u00A0server")) {
+            assertEquals("for '$l'", RegisterResult.LabelInUse(first.id), r.register(custom(l)))
+        }
+        assertEquals(listOf(first), r.custom())
+    }
+
+    @Test fun differentLabelsAreStillAccepted() {
+        val r = registryWith("Home server", "Home server 2", "Work", "Groq proxy")
+        assertEquals(4, r.custom().size)
+    }
+
+    @Test fun aLabelCanBeReusedOnceItsOwnerIsRemoved() {
+        val r = registryWith("Temp")
+        val gone = r.custom().single()
+        assertEquals(RemoveResult.Removed, r.remove(gone.id))
+        assertEquals(RegisterResult.Added, r.register(custom("temp")))
+    }
+
+    @Test fun idThenKeyNameThenLabelDecideWhichRefusalIsReported() {
+        val r = registryWith("Taken")
+        val taken = r.custom().single()
+        // id first
+        assertEquals(RegisterResult.AlreadyRegistered(taken), r.register(custom("Taken", id = taken.id)))
+        // key name before label
+        assertEquals(RegisterResult.KeyNameInUse(AiProvider.GROQ.toId()), r.register(custom("taken", keyName = AiProvider.GROQ.keyName)))
+        // label last
+        assertEquals(RegisterResult.LabelInUse(taken.id), r.register(custom("TAKEN")))
+    }
+
+    @Test fun aLabelWithNoVisibleCharacterIsRejected() {
+        for (l in listOf("", " ", "\t\n", "\u200B", "\u200B\u200D\uFEFF", " \u200B ", "\u3164", "\u2800", "\u00A0\u2060")) {
+            try { custom(l); fail("accepted '${l.map { it.code }}'") } catch (e: IllegalArgumentException) { }
+        }
+    }
+
+    @Test fun aVisibleLabelThatContainsFormattingCharactersIsAccepted() {
+        for (l in listOf("Pro\u200Dvider", "\u200BHome", "Home\u200B", "\uD83D\uDC68\u200D\uD83D\uDCBB dev box", "\uD83D\uDE00", "家庭服务器")) {
+            assertEquals("for '$l'", l, custom(l).label)
+        }
+    }
+
+    @Test fun normalizingTreatsInvisibleCharactersCaseAndSpacingAsTheSameLabel() {
+        assertEquals(ProviderLabels.normalize("Groq"), ProviderLabels.normalize(" G\u200Broq  "))
+        assertEquals(ProviderLabels.normalize("a b"), ProviderLabels.normalize("A\u00A0\u00A0 B"))
+        assertTrue(ProviderLabels.normalize("Groq") != ProviderLabels.normalize("Groq2"))
+    }
 }

@@ -8,6 +8,7 @@ import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.memory.Memories
 import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.providerRegistry
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.settings.AndroidKeyBook
 import dev.jarvis.assistant.settings.SettingsRepository
@@ -22,7 +23,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val storage = FileChatStorage(File(app.filesDir, "chats"))
     private val ledger = QuotaLedgers.get(app)
     private val settingsRepo = SettingsRepository(app)
-    private val registry = ProviderRegistry.withBuiltIns()
+    private val registry = app.providerRegistry()
     private val keyBook = AndroidKeyBook.create(app, registry)
     private val hooks = AndroidMemoryHooks(settingsRepo, Memories.get(app))
     private val source = SettingsProviderSource(

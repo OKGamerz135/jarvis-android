@@ -351,7 +351,7 @@ private fun ConfigureProvidersTab(
                                     quotaText = "Asking OpenRouter..."
                                     scope.launch {
                                         quotaText = try {
-                                            val key = withContext(Dispatchers.IO) { AndroidKeyBook.create(context, ProviderRegistry.withBuiltIns()).read(p.toId()) }.orEmpty()
+                                            val key = withContext(Dispatchers.IO) { AndroidKeyBook.create(context, vm.registry).read(p.toId()) }.orEmpty()
                                             OpenRouterParsing.describe(Providers.openRouter().freeQuota(key))
                                         } catch (e: LlmException) {
                                             ErrorMessages.of(e.error)

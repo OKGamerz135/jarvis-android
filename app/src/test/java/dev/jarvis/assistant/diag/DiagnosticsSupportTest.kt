@@ -56,4 +56,19 @@ class DiagnosticsSupportTest {
         assertTrue(text, text.contains("UNAVAILABLE"))
         assertFalse(text, text.contains("AIza"))
     }
+
+    @Test
+    fun usageAndCooldownAreNeverSharedBetweenDifferentLabels() {
+        // Labels are matched exactly. The registry guarantees no two providers share a normalized label, so providers
+        // that differ only slightly (a prefix, another case) keep completely separate usage and cooldown.
+        val list = listOf(
+            entry(1000, CallKind.GENERATE_STREAM, provider = "Groq"),
+            entry(2000, CallKind.GENERATE_ONCE, provider = "Groq proxy"),
+        )
+        assertEquals(1, UsageGuard.generationCalls(list, "Groq", 0))
+        assertEquals(1, UsageGuard.generationCalls(list, "Groq proxy", 0))
+        assertEquals(0, UsageGuard.generationCalls(list, "groq", 0))
+        assertEquals(59_000L, UsageGuard.cooldownRemainingMs(list, "Groq", 2000))
+        assertEquals(0L, UsageGuard.cooldownRemainingMs(listOf(entry(1000, CallKind.GENERATE_STREAM, provider = "Groq")), "Groq proxy", 1500))
+    }
 }

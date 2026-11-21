@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.providerRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +19,7 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SettingsRepository(app)
     /** The providers this screen shows. Only the built-in ones exist until custom providers are added. */
-    val registry: ProviderRegistry = ProviderRegistry.withBuiltIns()
+    val registry: ProviderRegistry = app.providerRegistry()
     private val keys = AndroidKeyBook.create(app, registry)
 
     /** Null only for the split second before the saved settings have been read. */

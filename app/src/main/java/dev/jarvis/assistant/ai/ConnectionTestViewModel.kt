@@ -8,6 +8,7 @@ import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.diag.UsageGuard
 import dev.jarvis.assistant.providers.ProviderId
 import dev.jarvis.assistant.providers.ProviderRegistry
+import dev.jarvis.assistant.providers.providerRegistry
 import dev.jarvis.assistant.providers.QuotaLedgers
 import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
@@ -30,7 +31,7 @@ import kotlinx.coroutines.withContext
  */
 class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SettingsRepository(app)
-    private val registry = ProviderRegistry.withBuiltIns()
+    private val registry = app.providerRegistry()
     private val keys = AndroidKeyBook.create(app, registry)
 
     private val tester = ConnectionTester(
