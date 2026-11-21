@@ -150,6 +150,7 @@ data class ProviderStatusModel(
                 AvailabilityState.Running -> add("Availability check: running")
                 is AvailabilityState.Ok -> add("Availability check: the key is accepted and model \"${a.model}\" exists")
                 is AvailabilityState.Failed -> add("Availability check failed: ${a.message}")
+                is AvailabilityState.Unverified -> add("Availability check: model list unavailable, so the model name was not verified (not a failure, not a pass)")
             }
             when (val g = t.generation) {
                 TestState.Idle -> {}
@@ -175,6 +176,10 @@ data class ProviderStatusModel(
                 TestStatus.RUNNING
             t.availability is AvailabilityState.Failed || t.generation is TestState.Failed || t.diagnostics is DiagState.Failed ->
                 TestStatus.FAILED
+            // Model list unavailable (not a pass by itself), but the diagnostics generation step failed.
+            (t.diagnostics as? DiagState.Done)?.lines.let { lines ->
+                lines != null && lines.any { it.unverified } && lines.any { it.ok == false }
+            } -> TestStatus.FAILED
             t.generation is TestState.Done -> TestStatus.PASSED
             t.availability is AvailabilityState.Ok -> TestStatus.ACCEPTED
             else -> TestStatus.NOT_TESTED

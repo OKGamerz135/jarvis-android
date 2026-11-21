@@ -4,10 +4,13 @@ sealed interface Outcome {
     data class Ok(val note: String) : Outcome
     data class Fail(val error: LlmError, val context: FailureContext?) : Outcome
     data class Skipped(val reason: String) : Outcome
+
+    /** The step could not verify anything (a server with no model list). Not a pass and not a failure. */
+    data class Unverified(val reason: String) : Outcome
 }
 
 /** [ok] is null for a skipped step. */
-data class DiagLine(val label: String, val ok: Boolean?, val detail: String)
+data class DiagLine(val label: String, val ok: Boolean?, val detail: String, val unverified: Boolean = false)
 
 /**
  * Turns the three diagnostic steps into result lines and a plain-language verdict. Pure logic, unit-tested:
@@ -31,6 +34,7 @@ object DiagnosticsVerdict {
     private fun line(label: String, outcome: Outcome): DiagLine = when (outcome) {
         is Outcome.Ok -> DiagLine(label, true, outcome.note)
         is Outcome.Skipped -> DiagLine(label, null, "skipped: ${outcome.reason}")
+        is Outcome.Unverified -> DiagLine(label, null, "could not be verified: ${outcome.reason}", unverified = true)
         is Outcome.Fail -> {
             val where = FailureFormatter.oneLine(outcome.context)
             val text = ErrorMessages.of(outcome.error)
@@ -40,6 +44,7 @@ object DiagnosticsVerdict {
 
     fun verdict(check: Outcome, stream: Outcome, once: Outcome, name: String = "Google"): String {
         if (check is Outcome.Fail) return checkFailed(check.error, name)
+        if (check is Outcome.Unverified) return unverifiedVerdict(stream, once, name)
         if (check !is Outcome.Ok) return "The availability check didn't run, so there is nothing to conclude yet."
 
         return when (stream) {
@@ -49,7 +54,23 @@ object DiagnosticsVerdict {
             is Outcome.Skipped ->
                 "The availability check passed (key accepted, model exists), but I skipped the generation steps: ${stream.reason}."
             is Outcome.Fail -> streamFailed(stream, once, name)
+            is Outcome.Unverified -> "The generation step could not be verified (${stream.reason}), so nothing is confirmed yet."
         }
+    }
+
+    /** No model list to check: only the generation steps can say anything, and "unverified" is never turned into a pass by itself. */
+    private fun unverifiedVerdict(stream: Outcome, once: Outcome, name: String): String = when (stream) {
+        is Outcome.Ok ->
+            "A streamed reply came back from $name, so it is reachable and the key and model work. The model name itself " +
+                "could not be checked separately, because the server offers no model list."
+        is Outcome.Skipped ->
+            "$name offers no model list, so the model name could not be checked, and the generation steps were skipped (${stream.reason}). " +
+                "Nothing has been verified yet."
+        is Outcome.Fail ->
+            "$name offers no model list, so the model name could not be checked, and generation failed: ${ErrorMessages.of(stream.error)}" +
+                (if (once is Outcome.Fail) " The non-streamed comparison failed too: ${ErrorMessages.of(once.error)}" else "")
+        is Outcome.Unverified ->
+            "$name offers no model list, and the generation step could not be verified either (${stream.reason}). Nothing has been verified yet."
     }
 
     private fun checkFailed(error: LlmError, name: String): String = when (error) {
@@ -85,6 +106,8 @@ object DiagnosticsVerdict {
                 }
             is Outcome.Skipped ->
                 "Streaming hit a server-side error and the non-streamed comparison was skipped (${once.reason}), so I can't separate $name's capacity from JARVIS's streaming code yet."
+            is Outcome.Unverified ->
+                "Streaming hit a server-side error and the non-streamed comparison could not be verified (${once.reason}), so I can't separate $name's capacity from JARVIS's streaming code yet."
         }
     }
 }

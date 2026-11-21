@@ -185,7 +185,7 @@ class ChatRunnerPreferredTest {
             settings = { JarvisSettings(provider = preferred, acknowledged = AiProvider.entries.toSet(), failoverEnabled = failover) },
             readKey = { id -> id.toAiProviderOrNull()?.takeIf { it in keyed }?.let { "key-${it.name}" } },
             hasKey = { id -> id.toAiProviderOrNull() in keyed },
-            llmFor = { llms.getValue(it) },
+            llmFor = { id -> id.toAiProviderOrNull()?.let { llms.getValue(it) } },
             ledger = ledger,
             savePreferred = {},
         )

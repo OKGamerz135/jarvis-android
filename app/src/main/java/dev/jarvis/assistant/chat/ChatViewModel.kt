@@ -3,6 +3,7 @@ package dev.jarvis.assistant.chat
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.jarvis.assistant.ai.ProviderAdapters
 import dev.jarvis.assistant.ai.Providers
 import dev.jarvis.assistant.diag.DiagnosticsLog
 import dev.jarvis.assistant.memory.Memories
@@ -25,13 +26,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsRepo = SettingsRepository(app)
     private val registry = app.providerRegistry()
     private val keyBook = AndroidKeyBook.create(app, registry)
+    private val adapters = ProviderAdapters(registry, Providers::forProvider, Providers::diagnosticsFor)
     private val hooks = AndroidMemoryHooks(settingsRepo, Memories.get(app))
     private val source = SettingsProviderSource(
         registry = registry,
         settings = { settingsRepo.settings.first() },
         readKey = { id -> withContext(Dispatchers.IO) { keyBook.read(id) } },
         hasKey = keyBook::has,
-        llmFor = Providers::forProvider,
+        llmFor = adapters::llmFor,
         ledger = ledger,
         savePreferred = { p -> settingsRepo.update { it.copy(provider = p) } },
     )

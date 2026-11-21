@@ -97,6 +97,13 @@ sealed interface LlmError {
     /** A 5xx status in the provider's error format but without a status name we recognise. */
     data class ServerTrouble(val httpCode: Int) : LlmError
 
+    /**
+     * The server has no (usable) model list: it answered HTTP 404 or 405 for it, answered 200 with something that is not a
+     * model list, or there is no list to ask for ([httpStatus] is null). The model name could NOT be checked. This is not a
+     * successful check and not a connection failure; only a real generation can show the model works.
+     */
+    data class ModelListUnavailable(val httpStatus: Int?) : LlmError
+
     data class Blocked(val reason: String) : LlmError
     data class Unsupported(val what: String) : LlmError
     data class Other(val message: String) : LlmError

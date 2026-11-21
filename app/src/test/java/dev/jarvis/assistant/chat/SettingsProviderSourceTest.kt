@@ -5,6 +5,7 @@ import dev.jarvis.assistant.ai.ChatRequest
 import dev.jarvis.assistant.ai.LlmProvider
 import dev.jarvis.assistant.providers.ProviderDescriptor
 import dev.jarvis.assistant.providers.ProviderId
+import dev.jarvis.assistant.providers.toAiProviderOrNull
 import dev.jarvis.assistant.providers.ProviderRegistry
 import dev.jarvis.assistant.providers.toId
 import dev.jarvis.assistant.settings.AiProvider
@@ -43,7 +44,7 @@ class SettingsProviderSourceTest {
         settings = { settings },
         readKey = { id -> val name = registry.get(id)?.keyName ?: return@SettingsProviderSource null; keyReads += name; keys[name] },
         hasKey = { id -> registry.get(id)?.keyName?.let { keys[it] } != null },
-        llmFor = { llmBuilt += it; Llm(it.name) },
+        llmFor = { id -> id.toAiProviderOrNull()?.let { llmBuilt += it; Llm(it.name) } },
         ledger = newLedger(),
         savePreferred = { saved += it },
     )
@@ -191,5 +192,16 @@ class SettingsProviderSourceTest {
         assertFalse(snap.candidates.any { it.provider == d.id })
         assertEquals(true, snap.candidates.first { it.provider == G.toId() }.hasKey)
         assertEquals(false, snap.candidates.first { it.provider == AiProvider.ZAI.toId() }.hasKey)
+    }
+
+    @Test fun aBuiltInWithNoAdapterStopsAndSendsNothing() = runBlocking {
+        val src = SettingsProviderSource(
+            registry = registry, settings = { settings },
+            readKey = { id -> registry.get(id)?.keyName?.let { keys[it] } },
+            hasKey = { id -> registry.get(id)?.keyName?.let { keys[it] } != null },
+            llmFor = { null }, ledger = newLedger(), savePreferred = { },
+        )
+        val stop = src.resolve(Q.toId()) as Resolved.Stop
+        assertTrue(stop.problem.message, stop.problem.message.contains("Groq"))
     }
 }

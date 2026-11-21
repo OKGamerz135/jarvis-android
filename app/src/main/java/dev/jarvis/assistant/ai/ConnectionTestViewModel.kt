@@ -33,6 +33,7 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SettingsRepository(app)
     private val registry = app.providerRegistry()
     private val keys = AndroidKeyBook.create(app, registry)
+    private val adapters = ProviderAdapters(registry, Providers::forProvider, Providers::diagnosticsFor)
 
     private val tester = ConnectionTester(
         scope = viewModelScope,
@@ -41,12 +42,12 @@ class ConnectionTestViewModel(app: Application) : AndroidViewModel(app) {
             settings = { repo.settings.first() },
             readKey = { id -> withContext(Dispatchers.IO) { keys.read(id) } },
             hasKey = keys::has,
-            llmFor = Providers::forProvider,
+            llmFor = adapters::llmFor,
             ledger = QuotaLedgers.get(app),
             savePreferred = {}, // tests never change the chat provider
         ),
         labelOf = ::labelOf,
-        diagnosticsFor = Providers::diagnosticsFor,
+        diagnosticsFor = adapters::diagnosticsFor,
         recentEntries = { DiagnosticsLog.entries.value },
     )
 

@@ -113,6 +113,13 @@ private fun AvailabilityCard(provider: AiProvider, canStart: Boolean, state: Ava
             )
         }
         is AvailabilityState.Failed -> Panel { FailureBlock(s.message, s.details) }
+        // Neutral on purpose: not a pass (nothing was verified) and not a failure (nothing is known to be wrong).
+        is AvailabilityState.Unverified -> Panel {
+            Hint("Result for ${s.provider}")
+            Text("Model list unavailable: the model name could not be verified.", style = MaterialTheme.typography.titleSmall)
+            Hint(s.reason)
+            Hint("This is not a connection failure and it is not a pass. Send a test message (step 2) to find out whether the model really works.")
+        }
     }
 }
 
@@ -191,7 +198,7 @@ private fun DiagnosticsCard(provider: AiProvider, canStart: Boolean, state: Diag
         is DiagState.Failed -> Panel { Text(d.message, color = MaterialTheme.colorScheme.error) }
         is DiagState.Done -> Panel {
             for (l in d.lines) {
-                val mark = when (l.ok) { true -> "PASS"; false -> "FAIL"; null -> "SKIP" }
+                val mark = when (l.ok) { true -> "PASS"; false -> "FAIL"; null -> if (l.unverified) "UNVERIFIED" else "SKIP" }
                 Text("$mark  ${l.label}", style = MaterialTheme.typography.titleSmall)
                 Hint(l.detail)
             }

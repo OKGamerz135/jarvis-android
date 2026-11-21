@@ -34,6 +34,13 @@ sealed interface AvailabilityState {
     data object Running : AvailabilityState
     data class Ok(val provider: String, val model: String, val displayName: String?, val canGenerate: Boolean) : AvailabilityState
     data class Failed(val message: String, val details: String?) : AvailabilityState
+
+    /**
+     * The server has no model list, so the model name could not be checked ([LlmError.ModelListUnavailable]). This is NOT
+     * [Ok] (nothing was verified) and NOT [Failed] (nothing is known to be wrong). It never counts as accepted or passed;
+     * only a real generation reply can pass a provider.
+     */
+    data class Unverified(val provider: String, val model: String, val reason: String) : AvailabilityState
 }
 
 sealed interface DiagState {
@@ -70,7 +77,8 @@ class ConnectionTester(
     private val source: ProviderSource,
     /** The name shown for a provider (from its registered descriptor). Used in messages, never to pick a provider. */
     private val labelOf: (ProviderId) -> String,
-    private val diagnosticsFor: (AiProvider) -> ProviderDiagnostics,
+    /** The diagnostics adapter for a provider, or null if there is none (then nothing is sent). */
+    private val diagnosticsFor: (ProviderId) -> ProviderDiagnostics?,
     private val recentEntries: () -> List<DiagnosticEntry>,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val maxRetries: Int = 2,
@@ -123,7 +131,7 @@ class ConnectionTester(
         return true
     }
 
-    private class Go(val target: dev.jarvis.assistant.chat.ChatTarget, val llm: LlmProvider, val builtIn: AiProvider)
+    private class Go(val target: dev.jarvis.assistant.chat.ChatTarget, val llm: LlmProvider, val tools: ProviderDiagnostics)
 
     /**
      * Consent and key checks for exactly [provider]. Returns the reason text instead of a target when not usable.
@@ -131,7 +139,8 @@ class ConnectionTester(
      * is refused here, before anything is resolved or sent, and is never mapped to some other provider.
      */
     private suspend fun preflight(provider: ProviderId): Pair<Go?, String?> {
-        val builtIn = provider.toAiProviderOrNull()
+        // Defence in depth: today only built-in providers can be resolved, so anything else is refused before the source is asked.
+        provider.toAiProviderOrNull()
             ?: return null to "${labelOf(provider)} can't be tested here yet. Nothing was sent."
         return when (val r = source.resolve(provider)) {
             is Resolved.Stop -> null to r.problem.message
@@ -140,7 +149,9 @@ class ConnectionTester(
                     // A resolver that answers for another provider would reintroduce the old bug. Refuse loudly.
                     null to "Internal error: asked for ${labelOf(provider)} but was given ${r.target.providerLabel}. Nothing was sent."
                 } else {
-                    Go(r.target, r.llm, builtIn) to null
+                    val tools = diagnosticsFor(provider)
+                    if (tools == null) null to "${labelOf(provider)} can't be tested here yet. Nothing was sent."
+                    else Go(r.target, r.llm, tools) to null
                 }
         }
     }
@@ -172,16 +183,20 @@ class ConnectionTester(
 
     fun checkAvailability(provider: ProviderId): Boolean = start(provider, TestKind.AVAILABILITY) { epoch ->
         publish(provider, epoch) { it.copy(availability = AvailabilityState.Running) }
+        var modelOfRun = ""
         val result: AvailabilityState = try {
             val (go, why) = preflight(provider)
             if (go == null) {
                 AvailabilityState.Failed(why ?: "Not ready.", null)
             } else {
-                val info = diagnosticsFor(go.builtIn).checkModel(go.target.apiKey, go.target.model)
+                modelOfRun = go.target.model
+                val info = go.tools.checkModel(go.target.apiKey, go.target.model)
                 AvailabilityState.Ok(labelOf(provider), go.target.model, info.displayName, info.canGenerate)
             }
         } catch (e: LlmException) {
-            AvailabilityState.Failed(ErrorMessages.of(e.error), FailureFormatter.details(e.context, 1))
+            val unavailable = e.error as? LlmError.ModelListUnavailable
+            if (unavailable != null) AvailabilityState.Unverified(labelOf(provider), modelOfRun, ErrorMessages.of(unavailable))
+            else AvailabilityState.Failed(ErrorMessages.of(e.error), FailureFormatter.details(e.context, 1))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -255,7 +270,7 @@ class ConnectionTester(
             if (go == null) {
                 DiagState.Failed(why ?: "Not ready.")
             } else {
-                val tools = diagnosticsFor(go.builtIn)
+                val tools = go.tools
                 val target = go.target
 
                 // Step 1: no generation, no generation quota.
@@ -267,12 +282,15 @@ class ConnectionTester(
                     }
                     "key accepted, model ${info.id} found, text generation supported"
                 }
+                // A server with no model list leaves the check UNVERIFIED (not passed, not failed): the generation steps still run,
+                // because only a real reply can show the provider works. Any real failure of the check still stops here.
+                val canGo = check is Outcome.Ok || check is Outcome.Unverified
 
                 // Steps 2 and 3 use generation quota, so they respect the cooldown and a hard limit of two calls.
                 val wait = cooldownLeftMs(provider)
                 val stream: Outcome
                 var once: Outcome = Outcome.Skipped("not needed")
-                if (check !is Outcome.Ok) {
+                if (!canGo) {
                     stream = Outcome.Skipped("the availability check failed first")
                     once = Outcome.Skipped("the availability check failed first")
                 } else if (wait > 0) {
@@ -313,6 +331,7 @@ class ConnectionTester(
         try {
             Outcome.Ok(block())
         } catch (e: LlmException) {
-            Outcome.Fail(e.error, e.context)
+            val unavailable = e.error as? LlmError.ModelListUnavailable
+            if (unavailable != null) Outcome.Unverified(ErrorMessages.of(unavailable)) else Outcome.Fail(e.error, e.context)
         }
 }

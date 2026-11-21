@@ -307,4 +307,33 @@ class ProviderStatusModelTest {
         assertTrue(all.getValue(a.id).active); assertFalse(all.getValue(b.id).active)
         assertTrue(all.getValue(a.id).preferred); assertFalse(all.getValue(b.id).preferred)
     }
+
+    // ------------------------------------------------------------------ C3a: model list unavailable
+
+    private val unverified = AvailabilityState.Unverified("Custom", "m", "no model list")
+    private fun doneWith(vararg ok: Boolean?) =
+        DiagState.Done(ok.map { dev.jarvis.assistant.ai.DiagLine("x", it, "d", unverified = it == null) }, "v")
+
+    @Test fun anUnavailableModelListAloneIsNotTestedNeitherAcceptedNorPassed() {
+        assertEquals(TestStatus.NOT_TESTED, ProviderStatusModel.testStatus(none.copy(availability = unverified)))
+    }
+
+    @Test fun anUnavailableListPlusARealGenerationPasses() {
+        assertEquals(TestStatus.PASSED, ProviderStatusModel.testStatus(none.copy(availability = unverified, generation = genDone)))
+    }
+
+    @Test fun anUnavailableListPlusAFailedGenerationFails() {
+        assertEquals(TestStatus.FAILED, ProviderStatusModel.testStatus(none.copy(availability = unverified, generation = TestState.Failed("x", null))))
+    }
+
+    @Test fun anUnavailableListWithAFailedDiagnosticsStepFailsButASuccessfulOneDoesNotPass() {
+        assertEquals(TestStatus.FAILED, ProviderStatusModel.testStatus(none.copy(availability = unverified, diagnostics = doneWith(null, false, null))))
+        assertEquals(TestStatus.NOT_TESTED, ProviderStatusModel.testStatus(none.copy(availability = unverified, diagnostics = doneWith(null, true, true))))
+    }
+
+    @Test fun theUnavailableListLineSaysItIsNeitherAPassNorAFailure() {
+        val line = ProviderStatusModel.testDetails(none.copy(availability = unverified)).single()
+        assertTrue(line, line.contains("not verified") || line.contains("unavailable") || line.contains("could not"))
+        assertFalse(line.contains("is accepted") || line.contains("exists"))
+    }
 }

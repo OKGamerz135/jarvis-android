@@ -53,6 +53,7 @@ class ConnectionTesterTest {
         @Volatile var gate: CompletableDeferred<Unit>? = null     // when set, checkModel waits for it
         @Volatile var streamFailure: LlmException? = null
         @Volatile var canGenerate = true
+        @Volatile var listFailure: LlmException? = null           // e.g. a server with no model list
         @Volatile var ignoresCancellation = false                 // models work that keeps running after the check is stopped
 
         override fun stream(request: ChatRequest, options: CallOptions): Flow<String> = flow {
@@ -63,6 +64,7 @@ class ConnectionTesterTest {
 
         override suspend fun checkModel(apiKey: String, model: String): ModelInfo {
             checks += apiKey to model
+            listFailure?.let { throw it }
             if (ignoresCancellation) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate?.await() } else gate?.await()
             return ModelInfo(model, "name-of-$model", if (canGenerate) listOf("chat.completions") else emptyList())
         }
@@ -100,7 +102,7 @@ class ConnectionTesterTest {
     private var now = 10_000_000L
 
     private fun tester() = ConnectionTester(
-        scope, source, ::labelOf, { adapters.getValue(it) }, { entries }, clock = { now },
+        scope, source, ::labelOf, { id -> id.toAiProviderOrNull()?.let { adapters.getValue(it) } }, { entries }, clock = { now },
     )
 
     private val registry = ProviderRegistry.withBuiltIns()
@@ -202,7 +204,7 @@ class ConnectionTesterTest {
         adapters.getValue(G).streamFailure = LlmException(LlmError.Overloaded("busy"))
         adapters.getValue(Q).streamFailure = LlmException(LlmError.Overloaded("busy"))
         // maxRetries is counted by the adapters themselves; here the fake never retries, so use maxRetries = 0
-        val t = ConnectionTester(scope, source, ::labelOf, { adapters.getValue(it) }, { entries }, clock = { now }, maxRetries = 0)
+        val t = ConnectionTester(scope, source, ::labelOf, { id -> id.toAiProviderOrNull()?.let { adapters.getValue(it) } }, { entries }, clock = { now }, maxRetries = 0)
         t.runTest(G.toId(), "x"); t.settled()
         t.runTest(Q.toId(), "x"); t.settled()
         assertTrue((t.stateOf(G.toId()).generation as TestState.Failed).offerAlternative)
@@ -371,5 +373,74 @@ class ConnectionTesterTest {
         gate.complete(Unit)             // the old check now finishes anyway, with the OLD key's answer
         kotlinx.coroutines.delay(200)
         assertEquals("a stale result must never be shown", ProviderTestState(), t.stateOf(Q.toId()))
+    }
+
+    // ------------------------------------------------------------------ C3a: no model list is not a pass, and not a failure
+
+    private val noList = LlmException(LlmError.ModelListUnavailable(404))
+
+    @Test fun anUnavailableModelListIsUnverifiedAndNeverAcceptedOrPassed() = runBlocking {
+        adapters.getValue(Q).listFailure = noList
+        val t = tester()
+        t.checkAvailability(Q.toId()); t.settled()
+        val state = t.stateOf(Q.toId())
+        assertTrue(state.availability.toString(), state.availability is AvailabilityState.Unverified)
+        assertEquals(dev.jarvis.assistant.providers.TestStatus.NOT_TESTED, dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(state))
+        assertTrue("no generation was made by the check", adapters.getValue(Q).streamRequests.isEmpty() && adapters.getValue(Q).once.get() == 0)
+    }
+
+    @Test fun onlyARealGenerationAfterAnUnverifiedListPasses() = runBlocking {
+        adapters.getValue(Q).listFailure = noList
+        val t = tester()
+        t.checkAvailability(Q.toId()); t.settled()
+        t.runTest(Q.toId(), "x"); t.settled()
+        assertEquals(dev.jarvis.assistant.providers.TestStatus.PASSED, dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())))
+    }
+
+    @Test fun aFailedGenerationAfterAnUnverifiedListIsFailed() = runBlocking {
+        adapters.getValue(Q).listFailure = noList
+        adapters.getValue(Q).streamFailure = LlmException(LlmError.InvalidKey)
+        val t = tester()
+        t.checkAvailability(Q.toId()); t.settled()
+        t.runTest(Q.toId(), "x"); t.settled()
+        assertEquals(dev.jarvis.assistant.providers.TestStatus.FAILED, dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())))
+    }
+
+    @Test fun diagnosticsStillRunGenerationWhenTheListIsUnavailableAndSayWhatWasNotVerified() = runBlocking {
+        adapters.getValue(Q).listFailure = noList
+        val t = tester()
+        assertTrue(t.runDiagnostics(Q.toId())); t.settled()
+        assertEquals("generation was still attempted", 1, adapters.getValue(Q).streamRequests.size)
+        val done = t.stateOf(Q.toId()).diagnostics as DiagState.Done
+        val check = done.lines.first()
+        assertTrue(check.unverified); assertEquals(null, check.ok)
+        assertTrue(done.verdict, done.verdict.contains("model list") && done.verdict.contains("streamed reply came back"))
+        assertFalse(done.verdict.startsWith("Everything works"))
+        assertEquals("diagnostics alone never make a pass", dev.jarvis.assistant.providers.TestStatus.NOT_TESTED, dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())))
+    }
+
+    @Test fun diagnosticsWithAnUnavailableListAndAFailedGenerationReportFailureNotSuccess() = runBlocking {
+        adapters.getValue(Q).listFailure = noList
+        adapters.getValue(Q).streamFailure = LlmException(LlmError.InvalidKey)
+        val t = tester()
+        t.runDiagnostics(Q.toId()); t.settled()
+        val done = t.stateOf(Q.toId()).diagnostics as DiagState.Done
+        assertTrue(done.verdict, done.verdict.contains("generation failed"))
+        assertEquals(dev.jarvis.assistant.providers.TestStatus.FAILED, dev.jarvis.assistant.providers.ProviderStatusModel.testStatus(t.stateOf(Q.toId())))
+    }
+
+    @Test fun aRealListFailureStillStopsDiagnosticsBeforeGeneration() = runBlocking {
+        adapters.getValue(Q).listFailure = LlmException(LlmError.InvalidKey)
+        val t = tester()
+        t.runDiagnostics(Q.toId()); t.settled()
+        assertTrue("an invalid key must not lead to generation calls", adapters.getValue(Q).streamRequests.isEmpty())
+    }
+
+    @Test fun aProviderWithNoDiagnosticsAdapterFailsBeforeAnythingIsSent() = runBlocking {
+        val t = ConnectionTester(scope, source, ::labelOf, { null }, { entries }, clock = { now })
+        t.runDiagnostics(Q.toId()); t.settled()
+        val d = t.stateOf(Q.toId()).diagnostics
+        assertTrue(d.toString(), d is DiagState.Failed && d.message.contains("Nothing was sent"))
+        assertTrue(adapters.getValue(Q).streamRequests.isEmpty() && adapters.getValue(Q).checks.isEmpty())
     }
 }

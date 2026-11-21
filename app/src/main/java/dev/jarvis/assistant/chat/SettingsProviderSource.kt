@@ -36,7 +36,8 @@ class SettingsProviderSource(
     /** Returns the saved key or null when there is none or it can't be read. May run blocking work. */
     private val readKey: suspend (ProviderId) -> String?,
     private val hasKey: (ProviderId) -> Boolean,
-    private val llmFor: (AiProvider) -> LlmProvider,
+    /** The adapter for a provider, or null if there is none for it (unregistered, or registered but not able to run). */
+    private val llmFor: (ProviderId) -> LlmProvider?,
     private val ledger: QuotaLedger,
     private val savePreferred: suspend (AiProvider) -> Unit,
 ) : ProviderSource {
@@ -51,6 +52,8 @@ class SettingsProviderSource(
         // Only providers with an adapter in this build can run. (The generic adapter for custom providers comes later.)
         val builtIn = id.toAiProviderOrNull()
             ?: return Resolved.Stop(ChatProblem(cannotRunYetMessage(descriptor.label), null, needsSetup = true))
+        // (Settings, that is consent and model, are still typed by AiProvider, so a custom provider stops here until C4 gives
+        // them a home. The adapter lookup below is the second layer: no adapter means nothing is sent.)
         if (builtIn !in s.acknowledged) {
             return Resolved.Stop(ChatProblem(notAcknowledgedMessage(descriptor.label), null, needsSetup = true))
         }
@@ -58,6 +61,8 @@ class SettingsProviderSource(
         if (key.isNullOrBlank()) {
             return Resolved.Stop(ChatProblem(notConfiguredMessage(descriptor.label), null, needsSetup = true))
         }
+        val llm = llmFor(id)
+            ?: return Resolved.Stop(ChatProblem(cannotRunYetMessage(descriptor.label), null, needsSetup = true))
         val target = ChatTarget(
             provider = id,
             providerLabel = descriptor.label,
@@ -67,7 +72,7 @@ class SettingsProviderSource(
             systemPrompt = PromptBuilder.build(s),
             styleReminder = PromptBuilder.styleReminder(s),
         )
-        return Resolved.Ready(target, llmFor(builtIn))
+        return Resolved.Ready(target, llm)
     }
 
     override suspend fun snapshot(): ProviderSnapshot {

@@ -69,6 +69,10 @@ object ErrorMessages {
                 "network may be answering. Try another connection (mobile data instead of Wi-Fi, or turn off any VPN)."
         is LlmError.ServerTrouble ->
             "The provider is having trouble (HTTP ${error.httpCode}). This isn't your quota; try again in a minute."
+        is LlmError.ModelListUnavailable ->
+            "This server doesn't offer a list of models" + (error.httpStatus?.let { " (HTTP $it)" } ?: "") +
+                ", so I couldn't check that the model name exists. That is not a failure by itself, but it is not a pass either: " +
+                "only a successful test message shows the model works."
         is LlmError.Blocked -> "The provider declined to answer (${error.reason})."
         is LlmError.Unsupported -> "${error.what} isn't supported yet."
         is LlmError.Other -> error.message
