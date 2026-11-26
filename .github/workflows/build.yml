@@ -21,6 +21,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'Maintainer only: regenerate gradle/verification-metadata.xml on a clean runner and test it under enforcement. Needs no secrets.'
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -203,6 +208,111 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: bash ./scripts/emulator-install-test.sh dist/build40.apk dist/A.apk dist/B.apk dist/C.apk
+
+  # H1a-1 (amendment to the H1 plan, Rev 3 section 8): dependency verification bootstrap. Runs ONLY when a person dispatches
+  # the workflow with bootstrap=true. No secrets, no environment, read-only token, every cache off. It never runs on a
+  # push or a pull request, and it never touches release-build.
+  bootstrap-verification:
+    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Every cache off: nothing is restored and nothing is saved.
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          cache-disabled: true
+
+      # Same step as dev-build: throwaway keys that exist only on this runner, so assembleRelease signs without any secret.
+      - name: Create throwaway test keys
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/dev"
+          for k in key1 key2; do
+            pw="$(openssl rand -hex 16)"
+            echo "::add-mask::$pw"
+            echo "${k^^}_PW=$pw" >> "$GITHUB_ENV"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/dev/$k.p12" -storetype PKCS12 -storepass "$pw" -keypass "$pw" \
+              -alias dev -keyalg RSA -keysize 2048 -validity 2 -dname "CN=JARVIS throwaway $k" >/dev/null 2>&1
+          done
+
+      - name: Generate verification metadata (tasks of the test and dev-build jobs, no build cache, tasks re-run)
+        run: |
+          set -eu
+          chmod +x gradlew
+          test ! -e gradle/verification-metadata.xml
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.p12" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          ./gradlew --no-daemon --no-build-cache --rerun-tasks --write-verification-metadata sha256 testDebugUnitTest assembleRelease
+          test -s gradle/verification-metadata.xml
+          grep -q '<verify-metadata>true</verify-metadata>' gradle/verification-metadata.xml
+          grep -q '<verify-signatures>false</verify-signatures>' gradle/verification-metadata.xml
+          cp gradle/verification-metadata.xml "$RUNNER_TEMP/generated-metadata.xml"
+          echo "BOOTSTRAP-GENERATION: PASS"
+
+      - name: Print the metadata file into the log, numbered, with its SHA-256
+        run: |
+          set -eu
+          f=gradle/verification-metadata.xml
+          echo "BOOTSTRAP-METADATA-SHA256 $(sha256sum "$f" | cut -d' ' -f1)"
+          echo "BOOTSTRAP-METADATA-LINES $(wc -l < "$f")"
+          echo "BOOTSTRAP-METADATA-BYTES $(wc -c < "$f")"
+          echo "BOOTSTRAP-METADATA-COMPONENTS $(grep -c '<component ' "$f")"
+          echo "BOOTSTRAP-METADATA-BEGIN"
+          awk '{ printf "MD %06d %s\n", NR, $0 }' "$f"
+          echo "BOOTSTRAP-METADATA-END"
+
+      # The same tasks again WITHOUT --write-verification-metadata, so the generated file is enforced. A brand-new Gradle
+      # user home means nothing downloaded by the generation run is reused: every artifact is fetched and checked again.
+      - name: Enforcement run (same tasks, metadata enforced, fresh Gradle user home, no cache)
+        run: |
+          set -eu
+          export GRADLE_USER_HOME="$RUNNER_TEMP/gradle-home-enforce"
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.p12" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          cmp gradle/verification-metadata.xml "$RUNNER_TEMP/generated-metadata.xml"
+          ./gradlew --no-daemon --no-build-cache --rerun-tasks testDebugUnitTest assembleRelease
+          cmp gradle/verification-metadata.xml "$RUNNER_TEMP/generated-metadata.xml"
+          echo "BOOTSTRAP-ENFORCEMENT: PASS"
+
+      # Proof that the enforcement run really enforces: with every checksum replaced by zeros, a fresh Gradle user home
+      # must FAIL with a dependency verification error. The real file is put back and compared afterwards.
+      - name: Negative control (tampered checksums must be refused)
+        run: |
+          set -eu
+          f=gradle/verification-metadata.xml
+          python3 - <<'PY'
+          import re
+          p = "gradle/verification-metadata.xml"
+          s = open(p, encoding="utf-8").read()
+          t, n = re.subn(r'(sha256 value=")[0-9a-fA-F]+(")', lambda m: m.group(1) + "0" * 64 + m.group(2), s)
+          assert n > 0, "no sha256 entries found"
+          open(p, "w", encoding="utf-8").write(t)
+          print("tampered sha256 entries:", n)
+          PY
+          export GRADLE_USER_HOME="$RUNNER_TEMP/gradle-home-negative"
+          set +e
+          ./gradlew --no-daemon --no-build-cache :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/negative.log" 2>&1
+          code=$?
+          set -e
+          cp "$RUNNER_TEMP/generated-metadata.xml" "$f"
+          tail -n 30 "$RUNNER_TEMP/negative.log"
+          cmp "$f" "$RUNNER_TEMP/generated-metadata.xml"
+          [ "$code" -ne 0 ] || { echo "BOOTSTRAP-NEGATIVE-CONTROL: FAIL (tampered metadata was accepted)"; exit 1; }
+          grep -qi 'dependency verification failed' "$RUNNER_TEMP/negative.log" || { echo "BOOTSTRAP-NEGATIVE-CONTROL: FAIL (failed, but not with a verification error)"; exit 1; }
+          echo "BOOTSTRAP-NEGATIVE-CONTROL: PASS"
+
+      - name: Result
+        run: |
+          echo "BOOTSTRAP-RESULT generation=PASS enforcement=PASS negative-control=PASS components=$(grep -c '<component ' gradle/verification-metadata.xml) sha256=$(sha256sum gradle/verification-metadata.xml | cut -d' ' -f1)"
 
   release-build:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
