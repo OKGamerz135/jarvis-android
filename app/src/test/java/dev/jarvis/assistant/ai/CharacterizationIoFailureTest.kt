@@ -1,5 +1,9 @@
 package dev.jarvis.assistant.ai
 
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+
 import java.io.EOFException
 import java.io.IOException
 import java.net.NoRouteToHostException
@@ -41,4 +45,16 @@ internal object IoFailureCases {
         }
         out
     }
+}
+
+/** Group C: each case records today's behavior against the baseline. */
+@RunWith(Parameterized::class)
+internal class CharacterizationIoFailureTest(private val case: CharCase) {
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{0}")
+        fun cases(): List<Array<Any>> = IoFailureCases.all.map { arrayOf<Any>(it) }
+    }
+
+    @Test fun recordsTodaysBehavior() = CharCheck.assertRecorded(case)
 }

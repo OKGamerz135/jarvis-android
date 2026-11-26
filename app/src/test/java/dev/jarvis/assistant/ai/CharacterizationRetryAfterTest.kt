@@ -1,5 +1,9 @@
 package dev.jarvis.assistant.ai
 
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+
 /**
  * H1a-0 group A: Retry-After on 429 and 503, for every provider operation (302 cases).
  * Records what today's HttpURLConnection providers send and return. It says nothing about what they should do.
@@ -42,4 +46,16 @@ internal object RetryAfterCases {
         }
         out
     }
+}
+
+/** Group A: each case records today's behavior against the baseline. */
+@RunWith(Parameterized::class)
+internal class CharacterizationRetryAfterTest(private val case: CharCase) {
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{0}")
+        fun cases(): List<Array<Any>> = RetryAfterCases.all.map { arrayOf<Any>(it) }
+    }
+
+    @Test fun recordsTodaysBehavior() = CharCheck.assertRecorded(case)
 }

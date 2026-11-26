@@ -1,5 +1,9 @@
 package dev.jarvis.assistant.ai
 
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+
 /**
  * H1a-0 group B: statuses an HTTP client may act on by itself (122 cases).
  * B1-B6 are 401, 401 with a challenge, 407, 407 with a challenge, 408 and 421. B7 covers the redirect statuses that
@@ -44,4 +48,16 @@ internal object FollowUpCases {
         }
         out
     }
+}
+
+/** Group B: each case records today's behavior against the baseline. */
+@RunWith(Parameterized::class)
+internal class CharacterizationFollowUpStatusTest(private val case: CharCase) {
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{0}")
+        fun cases(): List<Array<Any>> = FollowUpCases.all.map { arrayOf<Any>(it) }
+    }
+
+    @Test fun recordsTodaysBehavior() = CharCheck.assertRecorded(case)
 }

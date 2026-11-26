@@ -8,8 +8,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -30,7 +28,7 @@ import kotlin.concurrent.thread
  * Nothing here says what the code should do. See "H1a-0 Stage Plan, Revision 2".
  *
  * Files for H1a-0: this harness, CharacterizationRetryAfterTest, CharacterizationFollowUpStatusTest,
- * CharacterizationIoFailureTest and (step 2 of the plan) CharacterizationBaseline.
+ * CharacterizationIoFailureTest and CharacterizationBaseline.
  */
 
 /** One request as the fake server saw it. Header values are kept; they are only inspected, never printed. */
@@ -278,6 +276,15 @@ internal object CharRunner {
     }
 }
 
+/** Compares a fresh observation with the recorded baseline. It records; it does not say what the code should do. */
+internal object CharCheck {
+    fun assertRecorded(case: CharCase) {
+        val expected = CharacterizationBaseline.expected(case.id)
+        if (expected == null) fail("no recorded baseline for ${case.id}")
+        assertEquals("recorded behavior of ${case.id}", expected, CharRunner.observe(case))
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Self-checks of the harness itself (4). They test the fake server, not the providers.
 
@@ -325,41 +332,5 @@ class CharacterizationHarnessSelfCheck {
         assertEquals(2, Regex("Retry-After: ").findAll(text).count())
         assertTrue(text.startsWith("HTTP/1.1 503 X\r\n"))
         assertTrue(text.contains("Content-Length: 1\r\n"))
-    }
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// STEP 2 (observation run). Removed in step 3 of the plan. Each chunk fails on purpose and carries its observed lines
-// in the failure message, because a failing test is the only output channel the existing CI keeps.
-
-internal object CharAll {
-    val all: List<CharCase> by lazy { RetryAfterCases.all + FollowUpCases.all + IoFailureCases.all }
-}
-
-@RunWith(Parameterized::class)
-class CharacterizationObservationDump(private val chunk: String) {
-    companion object {
-        @JvmStatic
-        @Parameterized.Parameters(name = "{0}")
-        fun chunks(): List<Array<Any>> {
-            val ids = CharAll.all.map { it.id }
-            check(ids.toSet().size == ids.size) { "duplicate case ids" }
-            return CharAll.all.map { it.chunk }.distinct().map { arrayOf<Any>(it) }
-        }
-    }
-
-    @Test fun ObservationDump() {
-        val cases = CharAll.all.filter { it.chunk == chunk }
-        val sb = StringBuilder()
-        sb.append("CHARACTERIZATION-OBSERVATION-BEGIN ").append(chunk).append(" n=").append(cases.size).append('\n')
-        for (c in cases) {
-            val first = CharRunner.observe(c)
-            val second = CharRunner.observe(c)
-            sb.append("OBS ").append(c.id).append(" => ").append(first)
-            if (first != second) sb.append("  !!UNSTABLE second=").append(second)
-            sb.append('\n')
-        }
-        sb.append("CHARACTERIZATION-OBSERVATION-END ").append(chunk)
-        fail(sb.toString())
     }
 }
