@@ -85,6 +85,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     // Android's own org.json is a stub in unit tests, so tests use the real library.
