@@ -1,0 +1,34 @@
+name: h1a-2a-discovery-probe
+# Read-only runner inspection. No Gradle, no SDK install or download, no secrets.
+on:
+  push:
+    branches: [probe/h1a-2a-discovery]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Runner image and OS
+        run: |
+          echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+          cat /etc/os-release | head -4
+          uname -m
+      - name: Android env
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+      - name: Platforms directory
+        run: |
+          ls -la "$ANDROID_HOME/platforms"
+          for d in "$ANDROID_HOME"/platforms/android-37*; do echo "== $d"; ls "$d" | head -20; grep -E 'Pkg.Revision|AndroidVersion' "$d/source.properties" 2>/dev/null; done
+      - name: sdkmanager list_installed
+        run: |
+          SM="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)"
+          echo "sdkmanager=$SM"
+          "$SM" --list_installed 2>&1 | grep -E 'platforms;|build-tools;|Path|----' || true
+      - name: build-tools and aapt2
+        run: |
+          ls -la "$ANDROID_HOME/build-tools"
+          ls -la "$ANDROID_HOME"/build-tools/*/aapt2
+          ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V
