@@ -10,7 +10,7 @@ val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
 android {
     namespace = "dev.jarvis.assistant"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.jarvis.assistant"

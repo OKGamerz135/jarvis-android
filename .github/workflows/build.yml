@@ -61,6 +61,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # H1a-2a: platform 37 must be present. Idempotent: skip if the exact package is installed, else install only that package.
+      - name: Android SDK platform 37 (platforms;android-37.0)
+        run: |
+          set -eu
+          PKG="platforms;android-37.0"
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SM"
+          installed() { "$SM" --list_installed 2>/dev/null | awk -F'|' -v p="$PKG" '{ gsub(/ /, "", $1); if ($1 == p) f = 1 } END { exit f ? 0 : 1 }'; }
+          if installed; then
+            echo "SDK-PLATFORM: $PKG already installed, install skipped"
+          else
+            echo "SDK-PLATFORM: $PKG missing, installing only this package"
+            yes | "$SM" --install "$PKG"
+            installed || { echo "SDK-PLATFORM: $PKG still missing after install"; exit 1; }
+            echo "SDK-PLATFORM: $PKG installed"
+          fi
+          "$SM" --list_installed 2>/dev/null | grep -F "$PKG"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
       - name: Unit tests
@@ -96,6 +115,25 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      # H1a-2a: platform 37 must be present. Idempotent: skip if the exact package is installed, else install only that package.
+      - name: Android SDK platform 37 (platforms;android-37.0)
+        run: |
+          set -eu
+          PKG="platforms;android-37.0"
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SM"
+          installed() { "$SM" --list_installed 2>/dev/null | awk -F'|' -v p="$PKG" '{ gsub(/ /, "", $1); if ($1 == p) f = 1 } END { exit f ? 0 : 1 }'; }
+          if installed; then
+            echo "SDK-PLATFORM: $PKG already installed, install skipped"
+          else
+            echo "SDK-PLATFORM: $PKG missing, installing only this package"
+            yes | "$SM" --install "$PKG"
+            installed || { echo "SDK-PLATFORM: $PKG still missing after install"; exit 1; }
+            echo "SDK-PLATFORM: $PKG installed"
+          fi
+          "$SM" --list_installed 2>/dev/null | grep -F "$PKG"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
@@ -145,6 +183,25 @@ jobs:
           [ "$got" = "$want" ] && echo "A is signed by key1 ($got)" || { echo "A signer mismatch"; exit 1; }
           gotc="$(grep -m1 'certificate SHA-256 digest' dist/C.certs.txt | sed 's/.*: *//')"
           [ "$gotc" != "$want" ] && echo "C is signed by a different key" || { echo "C unexpectedly matches key1"; exit 1; }
+
+      # H1a-2a: read-only evidence from the built APK (the APK is not modified).
+      - name: APK badging (aapt2, read-only)
+        run: |
+          set -eu
+          AAPT2="$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)"
+          echo "aapt2: $AAPT2"
+          "$AAPT2" dump badging dist/A.apk > "$RUNNER_TEMP/badging.txt"
+          grep -E "^(package|sdkVersion|targetSdkVersion|minSdkVersion|compileSdk)" "$RUNNER_TEMP/badging.txt" || true
+          grep -q "^sdkVersion:'31'$" "$RUNNER_TEMP/badging.txt" && echo "BADGING minSdk=31: PASS" || { echo "BADGING minSdk=31: FAIL"; exit 1; }
+          grep -q "^targetSdkVersion:'36'$" "$RUNNER_TEMP/badging.txt" && echo "BADGING targetSdk=36: PASS" || { echo "BADGING targetSdk=36: FAIL"; exit 1; }
+          c="$(grep -m1 '^package:' "$RUNNER_TEMP/badging.txt" | sed -n "s/.* compileSdkVersion='\([0-9.]*\)'.*/\1/p")"
+          if [ -z "$c" ]; then
+            echo "BADGING compileSdk: NO EVIDENCE in aapt2 output (not inferred from targetSdk)"
+          elif [ "$c" = "37" ]; then
+            echo "BADGING compileSdk=37: PASS"
+          else
+            echo "BADGING compileSdk=$c: FAIL (expected 37)"; exit 1
+          fi
 
       - name: Name the test APK
         run: cp dist/A.apk dist/jarvis.apk
@@ -229,6 +286,25 @@ jobs:
           java-version: '17'
 
       # Every cache off: nothing is restored and nothing is saved.
+      # H1a-2a: platform 37 must be present. Idempotent: skip if the exact package is installed, else install only that package.
+      - name: Android SDK platform 37 (platforms;android-37.0)
+        run: |
+          set -eu
+          PKG="platforms;android-37.0"
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SM"
+          installed() { "$SM" --list_installed 2>/dev/null | awk -F'|' -v p="$PKG" '{ gsub(/ /, "", $1); if ($1 == p) f = 1 } END { exit f ? 0 : 1 }'; }
+          if installed; then
+            echo "SDK-PLATFORM: $PKG already installed, install skipped"
+          else
+            echo "SDK-PLATFORM: $PKG missing, installing only this package"
+            yes | "$SM" --install "$PKG"
+            installed || { echo "SDK-PLATFORM: $PKG still missing after install"; exit 1; }
+            echo "SDK-PLATFORM: $PKG installed"
+          fi
+          "$SM" --list_installed 2>/dev/null | grep -F "$PKG"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           cache-disabled: true
