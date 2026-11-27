@@ -1,0 +1,136 @@
+name: scratch-h1a-2b-experiment
+# SCRATCH ONLY. Lives on the scratch branch. No secrets, no environment, read-only token, every cache off.
+on:
+  push:
+    branches: [scratch/h1a-2b-okhttp]
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: a7a0505960509e95f8bc826ffb433ed05e6a6a90
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: _scratch
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          cache-disabled: true
+      - name: Throwaway key
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/dev"
+          pw="$(openssl rand -hex 16)"; echo "::add-mask::$pw"; echo "KEY1_PW=$pw" >> "$GITHUB_ENV"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/dev/key1.p12" -storetype PKCS12 -storepass "$pw" -keypass "$pw" \
+            -alias dev -keyalg RSA -keysize 2048 -validity 2 -dname "CN=JARVIS throwaway" >/dev/null 2>&1
+      - name: Baseline build (a7a0505, existing metadata enforced) and diagnostics
+        run: |
+          set -eu
+          git rev-parse HEAD
+          chmod +x gradlew
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.p12" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          ./gradlew --no-daemon --no-build-cache assembleRelease
+          mkdir -p scratch && cp _scratch/scratch/diag.sh scratch/diag.sh && cp _scratch/scratch/diag.py scratch/diag.py
+          bash scratch/diag.sh baseline
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          cache-disabled: true
+      - name: Throwaway key
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/dev"
+          pw="$(openssl rand -hex 16)"; echo "::add-mask::$pw"; echo "KEY1_PW=$pw" >> "$GITHUB_ENV"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/dev/key1.p12" -storetype PKCS12 -storepass "$pw" -keypass "$pw" \
+            -alias dev -keyalg RSA -keysize 2048 -validity 2 -dname "CN=JARVIS throwaway" >/dev/null 2>&1
+      - name: Pre-check, old metadata must REFUSE the new dependency
+        run: |
+          chmod +x gradlew
+          set +e
+          ./gradlew --no-daemon --no-build-cache --console=plain :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/pre.log" 2>&1
+          code=$?
+          tail -n 25 "$RUNNER_TEMP/pre.log"
+          echo "PRECHECK exit=$code verification-error=$(grep -ci 'dependency verification failed' "$RUNNER_TEMP/pre.log")"
+      - name: Generate metadata (additive), clean cache
+        run: |
+          set -eu
+          cp gradle/verification-metadata.xml "$RUNNER_TEMP/orig-metadata.xml"
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.p12" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          ./gradlew --no-daemon --no-build-cache --rerun-tasks --write-verification-metadata sha256 testDebugUnitTest assembleRelease
+          cp gradle/verification-metadata.xml "$RUNNER_TEMP/generated-metadata.xml"
+          echo "GENERATION: DONE"
+      - name: Metadata diff and full file
+        run: |
+          set -eu
+          f=gradle/verification-metadata.xml
+          echo "META-ORIG-COMPONENTS $(grep -c '<component ' "$RUNNER_TEMP/orig-metadata.xml")"
+          echo "META-NEW-COMPONENTS $(grep -c '<component ' "$f")"
+          echo "META-NEW-SHA256 $(sha256sum "$f" | cut -d' ' -f1)"
+          git diff --numstat -- "$f"
+          echo "META-REMOVED-LINES $(git diff -U0 -- "$f" | grep -c '^-[^-]' || true)"
+          echo "META-ADDED-COMPONENTS-BEGIN"
+          git diff -U0 -- "$f" | grep -E '^\+ *<component ' | sed 's/^+ *//' || true
+          echo "META-ADDED-COMPONENTS-END"
+          echo "META-CHANGED-ORIG-BEGIN"
+          git diff -U0 -- "$f" | grep -E '^- ' || true
+          echo "META-CHANGED-ORIG-END"
+          echo "META-DIFF-BEGIN"
+          git diff -U0 -- "$f" | awk '{ printf "DF %06d %s\n", NR, $0 }'
+          echo "META-DIFF-END"
+          echo "BOOTSTRAP-METADATA-BEGIN"
+          awk '{ printf "MD %06d %s\n", NR, $0 }' "$f"
+          echo "BOOTSTRAP-METADATA-END"
+      - name: Enforcement run (fresh Gradle home, no write flag) and diagnostics
+        run: |
+          set -eu
+          export GRADLE_USER_HOME="$RUNNER_TEMP/gradle-home-enforce"
+          export JARVIS_KEYSTORE_FILE="$RUNNER_TEMP/dev/key1.p12" JARVIS_KEYSTORE_PASSWORD="$KEY1_PW" JARVIS_KEY_ALIAS=dev JARVIS_KEY_PASSWORD="$KEY1_PW"
+          cmp gradle/verification-metadata.xml "$RUNNER_TEMP/generated-metadata.xml"
+          ./gradlew --no-daemon --no-build-cache --rerun-tasks testDebugUnitTest assembleRelease
+          cmp gradle/verification-metadata.xml "$RUNNER_TEMP/generated-metadata.xml"
+          echo "ENFORCEMENT: PASS"
+          python3 scripts/summarize-tests.py app/build/test-results/testDebugUnitTest | sed 's/^/TESTS /'
+          ls app/build/test-results/testDebugUnitTest | grep -i smoke || echo "no smoke result file"
+          grep -o 'testcase name="[^"]*" classname="dev.jarvis.assistant.net.OkHttpSmokeTest"[^>]*' app/build/test-results/testDebugUnitTest/*OkHttpSmokeTest.xml || true
+          grep -c '<failure\|<error' app/build/test-results/testDebugUnitTest/*OkHttpSmokeTest.xml || true
+          bash scratch/diag.sh experiment
+      - name: Negative control
+        run: |
+          set -eu
+          f=gradle/verification-metadata.xml
+          python3 - <<'PY'
+          import re
+          p = "gradle/verification-metadata.xml"
+          s = open(p, encoding="utf-8").read()
+          t, n = re.subn(r'(sha256 value=")[0-9a-fA-F]+(")', lambda m: m.group(1) + "0" * 64 + m.group(2), s)
+          assert n > 0
+          open(p, "w", encoding="utf-8").write(t)
+          print("tampered:", n)
+          PY
+          export GRADLE_USER_HOME="$RUNNER_TEMP/gradle-home-negative"
+          set +e
+          ./gradlew --no-daemon --no-build-cache :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/neg.log" 2>&1
+          code=$?
+          set -e
+          cp "$RUNNER_TEMP/generated-metadata.xml" "$f"
+          cmp "$f" "$RUNNER_TEMP/generated-metadata.xml"
+          grep -qi 'dependency verification failed' "$RUNNER_TEMP/neg.log" && [ "$code" -ne 0 ] && echo "NEGATIVE-CONTROL: PASS" || { echo "NEGATIVE-CONTROL: FAIL"; exit 1; }
