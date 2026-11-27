@@ -192,7 +192,7 @@ jobs:
           echo "aapt2: $AAPT2"
           "$AAPT2" dump badging dist/A.apk > "$RUNNER_TEMP/badging.txt"
           grep -E "^(package|sdkVersion|targetSdkVersion|minSdkVersion|compileSdk)" "$RUNNER_TEMP/badging.txt" || true
-          grep -q "^sdkVersion:'31'$" "$RUNNER_TEMP/badging.txt" && echo "BADGING minSdk=31: PASS" || { echo "BADGING minSdk=31: FAIL"; exit 1; }
+          grep -q "^minSdkVersion:'31'$" "$RUNNER_TEMP/badging.txt" && echo "BADGING minSdk=31: PASS" || { echo "BADGING minSdk=31: FAIL"; exit 1; }
           grep -q "^targetSdkVersion:'36'$" "$RUNNER_TEMP/badging.txt" && echo "BADGING targetSdk=36: PASS" || { echo "BADGING targetSdk=36: FAIL"; exit 1; }
           c="$(grep -m1 '^package:' "$RUNNER_TEMP/badging.txt" | sed -n "s/.* compileSdkVersion='\([0-9.]*\)'.*/\1/p")"
           if [ -z "$c" ]; then
