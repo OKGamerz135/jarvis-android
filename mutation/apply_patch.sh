@@ -14,5 +14,5 @@ git apply --check "mutation/patches/$ID.patch" || exit 12
 git apply "mutation/patches/$ID.patch" || exit 13
 git diff --numstat > "$OUT/diff.numstat"; git diff --stat > "$OUT/diff.stat"
 test "$(git diff --name-only | wc -l)" = "1" || exit 14
-test "$(git diff -U0 | grep -c '^@@')" = "1" || exit 15
+test "$(grep -c '^@@' "mutation/patches/$ID.patch")" = "1" || exit 15
 exit 0

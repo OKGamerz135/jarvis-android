@@ -11,14 +11,15 @@ run_tests() {
 }
 git rev-parse HEAD >"$OUT/head.sha"
 run_tests control
-python3 - "$OUT" <<'PY' || { echo CONTROL-FAIL >"$OUT/status"; exit 1; }
+python3 - "$OUT" <<'PY' || { echo CONTROL-FAIL >"$OUT/status"; python3 mutation/emit.py det "$ID" "$OUT"; exit 1; }
 import json, sys
 c = json.load(open(sys.argv[1] + '/control.json')); t = c.get('totals') or {}
 ok = t.get('tests', 0) >= 47 and t.get('failures', 1) == 0 and t.get('errors', 1) == 0
 sys.exit(0 if ok else 1)
 PY
 bash mutation/apply_patch.sh "$ID" "$OUT"; rc=$?
-if [ $rc -ne 0 ]; then echo "PATCH-FAIL rc=$rc" >"$OUT/status"; exit 1; fi
+if [ $rc -ne 0 ]; then echo "PATCH-FAIL rc=$rc" >"$OUT/status"; python3 mutation/emit.py det "$ID" "$OUT"; exit 1; fi
 run_tests mutated
 { echo "mutated_exit=$(cat "$OUT/mutated.exit")"; echo "compile_error=$(grep -c '^e: ' "$OUT/mutated.log" || true)"; } >"$OUT/status"
+python3 mutation/emit.py det "$ID" "$OUT"
 exit 0

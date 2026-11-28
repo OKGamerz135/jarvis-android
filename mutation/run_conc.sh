@@ -10,6 +10,7 @@ rep() {  # label n
   echo $? >"$d/exit"
   rm -rf "$d/xml"; cp -r app/build/test-results/testDebugUnitTest "$d/xml" 2>/dev/null || mkdir -p "$d/xml"
   python3 mutation/collect.py "$d/xml" "$d/result.json" >/dev/null
+  python3 mutation/emit.py rep "$ID" "$label" "$2" "$d"
 }
 git rev-parse HEAD >"$OUT/head.sha"
 pass=0
@@ -23,9 +24,10 @@ PY
   echo "baseline rep $n done, passes so far: $pass"
 done
 echo "baseline_pass=$pass/30" >"$OUT/baseline.txt"
-if [ "$pass" -ne 30 ]; then echo "BASELINE-FAIL $pass/30" >"$OUT/status"; exit 1; fi
+if [ "$pass" -ne 30 ]; then echo "BASELINE-FAIL $pass/30" >"$OUT/status"; python3 mutation/emit.py conc "$ID" "$OUT"; exit 1; fi
 bash mutation/apply_patch.sh "$ID" "$OUT"; rc=$?
-if [ $rc -ne 0 ]; then echo "PATCH-FAIL rc=$rc" >"$OUT/status"; exit 1; fi
+if [ $rc -ne 0 ]; then echo "PATCH-FAIL rc=$rc" >"$OUT/status"; python3 mutation/emit.py conc "$ID" "$OUT"; exit 1; fi
 for n in $(seq 1 30); do rep mutant "$n"; echo "mutant rep $n done"; done
 echo "DONE" >"$OUT/status"
+python3 mutation/emit.py conc "$ID" "$OUT"
 exit 0
