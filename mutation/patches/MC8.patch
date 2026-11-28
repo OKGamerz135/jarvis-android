@@ -1,0 +1,13 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -34,8 +34,8 @@
+     val lookups: Int get() = lookupCount.get()
+     val networkPasses: Int get() = networkPassCount.get()
+ 
+-    fun incrementLookups(): Int = lookupCount.incrementAndGet()
+-    fun incrementNetworkPasses(): Int = networkPassCount.incrementAndGet()
++    fun incrementLookups(): Int { val n = lookupCount.get() + 1; lookupCount.set(n); return n }
++    fun incrementNetworkPasses(): Int { val n = networkPassCount.get() + 1; networkPassCount.set(n); return n }
+ 
+     /** Throws the stored violation if the context is poisoned. */
+     fun check() {

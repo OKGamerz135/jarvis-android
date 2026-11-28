@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -141,7 +141,6 @@
+ 
+     /** C3: after the TCP connect. */
+     fun afterConnect() {
+-        verify()
+     }
+ 
+     /** C4: after TLS, immediately before the first request byte. Later checkpoints read nothing. */

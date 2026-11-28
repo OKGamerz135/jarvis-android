@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
+@@ -106,6 +106,6 @@
+         for (e in TABLE) {
+             if ((v and e.mask) == e.network && (best == null || e.prefixLength > best.prefixLength)) best = e
+         }
+-        return best?.addressClass ?: AddressClass.PUBLIC
++        return if (best != null) AddressClass.PRIVATE else AddressClass.PUBLIC
+     }
+ }

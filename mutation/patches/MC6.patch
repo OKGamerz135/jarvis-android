@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -39,7 +39,7 @@
+ 
+     /** Throws the stored violation if the context is poisoned. */
+     fun check() {
+-        first.get()?.let { throw it }
++        first.get()?.let { throw GuardViolation(GuardReason.BIND_FAILED) }
+     }
+ 
+     /**

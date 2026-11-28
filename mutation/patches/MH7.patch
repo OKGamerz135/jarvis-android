@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
+@@ -30,7 +30,6 @@
+             val dd = l.indexOf("--")
+             if (dd >= 0 && !(dd == 2 && l.startsWith("xn--") && l.length > 4)) return null
+         }
+-        if (labels.last()[0] !in 'a'..'z') return null
+         if (IP_LITERAL_SHAPE.matches(h)) return null
+         return h
+     }

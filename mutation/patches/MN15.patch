@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -153,7 +153,6 @@
+ 
+     private fun verify() {
+         check(captured) { "capture() must come first" }
+-        if (finished) return
+         val net = activeNetworkOrViolate() ?: ctx.violate(GuardReason.NETWORK_CHANGED)
+         val current = fingerprintOf(net, linkStateOrViolate(net))
+         if (current != baseline) ctx.violate(GuardReason.NETWORK_CHANGED)

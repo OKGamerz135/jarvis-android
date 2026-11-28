@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -176,6 +176,6 @@
+         } catch (e: Exception) {
+             ctx.violate(GuardReason.NETWORK_STATE_UNAVAILABLE)
+         }
+-        return result ?: ctx.violate(GuardReason.NETWORK_CHANGED)
++        return result ?: LinkState(interfaceName = null, dnsServers = emptyList(), privateDnsActive = false, privateDnsServerName = null)
+     }
+ }

@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -64,7 +64,7 @@
+      * stop the others and does not replace the violation.
+      */
+     fun violate(reason: GuardReason, category: AddressClass? = null): Nothing {
+-        first.compareAndSet(null, GuardViolation(reason, category))
++        if (first.get() == null) first.set(GuardViolation(reason, category))
+         val stored = first.get()!!
+         val toClose: List<Closeable>
+         synchronized(lock) {

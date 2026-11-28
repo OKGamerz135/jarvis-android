@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -71,7 +71,6 @@
+             toClose = ArrayList(resources)
+             resources.clear()
+         }
+-        for (r in toClose) closeQuietly(r)
+         if (hookRan.compareAndSet(false, true)) {
+             try {
+                 cancelHook()

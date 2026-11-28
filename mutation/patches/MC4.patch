@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -74,7 +74,6 @@
+         for (r in toClose) closeQuietly(r)
+         if (hookRan.compareAndSet(false, true)) {
+             try {
+-                cancelHook()
+             } catch (_: Exception) {
+                 // The violation is what the caller needs to see.
+             }

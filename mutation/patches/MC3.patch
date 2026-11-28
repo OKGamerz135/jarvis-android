@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -53,7 +53,6 @@
+             if (poisoned == null) resources.add(resource)
+         }
+         if (poisoned != null) {
+-            closeQuietly(resource)
+             throw poisoned
+         }
+     }

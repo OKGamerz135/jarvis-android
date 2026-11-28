@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
+@@ -26,7 +26,7 @@
+         val labels = h.split('.')
+         if (labels.size < 2) return null
+         for (l in labels) {
+-            if (l.isEmpty() || l.length > 63 || !LABEL.matches(l)) return null
++            if (l.isEmpty() || l.length > 64 || !LABEL.matches(l)) return null
+             val dd = l.indexOf("--")
+             if (dd >= 0 && !(dd == 2 && l.startsWith("xn--") && l.length > 4)) return null
+         }

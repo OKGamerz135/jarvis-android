@@ -1,0 +1,1131 @@
+{
+ "concurrency_tests": {
+  "MC10": "n15c_a_resource_racing_with_a_violation_is_always_closed_exactly_once",
+  "MC8": "n18_counters_are_atomic",
+  "MC9": "n14_first_violation_wins_when_threads_race"
+ },
+ "excluded": {
+  "MA3": {
+   "reason": "equivalent",
+   "status": "excluded"
+  },
+  "MA4": {
+   "reason": "equivalent",
+   "status": "excluded"
+  },
+  "MA7": {
+   "reason": "equivalent",
+   "status": "excluded"
+  },
+  "MH2": {
+   "reason": "equivalent",
+   "status": "excluded"
+  },
+  "MH8": {
+   "reason": "equivalent",
+   "status": "excluded"
+  },
+  "MN6": {
+   "reason": "unobservable",
+   "status": "excluded"
+  }
+ },
+ "executable": {
+  "MA1": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t02a",
+     "text": "::1 must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MA1.patch",
+   "sha256": "47da8e7cf7d0f58c90fd8a01e403ca306b5c705eb65728a40d5b983919d065d4",
+   "status": "executable"
+  },
+  "MA2": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t01a",
+     "text": "8.8.8.8 should be allowed"
+    }
+   ],
+   "patch": "mutation/patches/MA2.patch",
+   "sha256": "55e1a95b788aeb984861615b23562b30fbf2fac0dd02672141eca17bb2c0817f",
+   "status": "executable"
+  },
+  "MA5": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t01a",
+     "text": "93.184.216.34 should be allowed"
+    }
+   ],
+   "patch": "mutation/patches/MA5.patch",
+   "sha256": "467576c94aa4e04df6f6b0232ca5f041a2ce574df4f3000ea639bf1a0d683e84",
+   "status": "executable"
+  },
+  "MA6": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "forbid": "must not be PUBLIC",
+     "kind": "A",
+     "test": "n5",
+     "text": "0.0.0.0/8 (0.0.0.0)"
+    }
+   ],
+   "patch": "mutation/patches/MA6.patch",
+   "sha256": "a9215c491a8fedc47da7f313b8b3a221d78268d4866d529398a208d1f4d164b9",
+   "status": "executable"
+  },
+  "MA8": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t02a",
+     "text": "127.0.0.1 must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MA8.patch",
+   "sha256": "5b9e15eb44a22585079aa166af20f44e2d77974cb2319f50c09cfa143a6b2780",
+   "status": "executable"
+  },
+  "MAR01": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "0.0.0.0/8",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR01.patch",
+   "sha256": "47e714e3229220f8e91058c6546d4766cd3aa33e29c2bbe125c0244dd0ccf751",
+   "status": "executable"
+  },
+  "MAR02": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "10.0.0.0/8",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR02.patch",
+   "sha256": "a21c83bcaaa01762b974865164ea7d90d370e893ba3e5319b08529ad10046d52",
+   "status": "executable"
+  },
+  "MAR03": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "172.16.0.0/12",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR03.patch",
+   "sha256": "09bccfc16f73038c9d2b9d75c2be28c73f47c1d9d202afbe28cdf9d255019134",
+   "status": "executable"
+  },
+  "MAR04": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.168.0.0/16",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR04.patch",
+   "sha256": "dd4cfc4a93f1408f15cbd1e509bbff71e79812d6cc4bbd90398325a14d44fbea",
+   "status": "executable"
+  },
+  "MAR05": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "100.64.0.0/10",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR05.patch",
+   "sha256": "17d8d9665b0b8dfa409a78009fcb5583ef2ecf69859a642b56d2dc8c8f078f50",
+   "status": "executable"
+  },
+  "MAR06": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "127.0.0.0/8",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR06.patch",
+   "sha256": "06a49f449152f223c1af2e3fe3fc69f47bc27fa9430b82f77e2305e43c556fe3",
+   "status": "executable"
+  },
+  "MAR07": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "169.254.0.0/16",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR07.patch",
+   "sha256": "114e82fe39450d7d20fb9034cfd517aa0b2ffe7dd86164efa62d4ea24aef69a0",
+   "status": "executable"
+  },
+  "MAR08": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "kind": "S",
+     "line": 135,
+     "test": "n7"
+    }
+   ],
+   "patch": "mutation/patches/MAR08.patch",
+   "sha256": "f92f0f9521dae4ea3fbce2e17c50d94a9e5176ec3fb32c58d4d412f3724951e9",
+   "status": "executable"
+  },
+  "MAR09": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "AddressPolicyTest",
+     "kind": "S",
+     "line": 228,
+     "test": "n36"
+    }
+   ],
+   "patch": "mutation/patches/MAR09.patch",
+   "sha256": "82d8f787a925d2324363fc3b22ac01681947ffecc0c09de2c2a5b1bb08d2228d",
+   "status": "executable"
+  },
+  "MAR10": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.0.0.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR10.patch",
+   "sha256": "7497570520639befc30802a43284df14ff49052bf3c866d2763200ebbfd46b55",
+   "status": "executable"
+  },
+  "MAR11": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.0.2.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR11.patch",
+   "sha256": "37c154df8821f8bb0f9917378a625a7957263a61d1675d4820bae4e073afd654",
+   "status": "executable"
+  },
+  "MAR12": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.31.196.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR12.patch",
+   "sha256": "0735cd1e25e0123ba7501a112cbe66feaf1b76a496a87f448748cb994b31093a",
+   "status": "executable"
+  },
+  "MAR13": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.52.193.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR13.patch",
+   "sha256": "6d3060a96bf04993a63ddcadc6cd74e7a72a8a85f8f60a7b1cee79bd6ea5a7c8",
+   "status": "executable"
+  },
+  "MAR14": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.88.99.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR14.patch",
+   "sha256": "2a67f9198723397e68b381a7622776cf0812b961984eaa521338f20a0cfd1dfb",
+   "status": "executable"
+  },
+  "MAR15": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "192.175.48.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR15.patch",
+   "sha256": "58558da68455e1e3f92cb89740c776676de66b17b6ad4c50ce401450001493ff",
+   "status": "executable"
+  },
+  "MAR16": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "198.18.0.0/15",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR16.patch",
+   "sha256": "33b5c2acf29d7e11955ea7cfb9d1ed24beacaf89427985ccc8d0e897934bbe1f",
+   "status": "executable"
+  },
+  "MAR17": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "198.51.100.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR17.patch",
+   "sha256": "a0edb3b06704d7291c09d2181b007b8326297309158c36d2f6927a1cf1e0de16",
+   "status": "executable"
+  },
+  "MAR18": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "203.0.113.0/24",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR18.patch",
+   "sha256": "b817599a6cad51e05309e8b7cf3c17c2698559484d26e486b8a3b260f8e96835",
+   "status": "executable"
+  },
+  "MAR19": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cidr": "240.0.0.0/4",
+     "cls": "AddressPolicyTest",
+     "kind": "ARANGE",
+     "test": "n5",
+     "text": "must not be PUBLIC"
+    }
+   ],
+   "patch": "mutation/patches/MAR19.patch",
+   "sha256": "ad59b50a40da46deb4ce52fd1a4c24dff44f11519239ab50bd9d8bcd75a0761c",
+   "status": "executable"
+  },
+  "MC1": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n19",
+     "text": "[MC1] the first violation must win"
+    }
+   ],
+   "patch": "mutation/patches/MC1.patch",
+   "sha256": "693aaec7b80b4aec872d544077c8421131ca60527462995169bb6e3aee43cc8a",
+   "status": "executable"
+  },
+  "MC10": {
+   "cls": "conc",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n15c",
+     "text": "[MC10] the racing resource must be closed exactly once"
+    }
+   ],
+   "patch": "mutation/patches/MC10.patch",
+   "sha256": "b8688e0fb6d19046e15b4378b5c74a544468bc63fc691d7a60a0ca4f9d87003d",
+   "status": "executable"
+  },
+  "MC11": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "emsg": "hook failed",
+     "etype": "java.lang.IllegalStateException",
+     "kind": "E",
+     "line": 213,
+     "test": "n20"
+    }
+   ],
+   "patch": "mutation/patches/MC11.patch",
+   "sha256": "d89d2171a8984e09471193a165c3a0386b558b193805a614619d8b102f962758",
+   "status": "executable"
+  },
+  "MC2": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n15a",
+     "text": "[MC2] resource 0 must be closed exactly once"
+    }
+   ],
+   "patch": "mutation/patches/MC2.patch",
+   "sha256": "f920cd3e5d381f35ccdd64385f9fee61a372ef9bd4a281c9bb1f7948a80746ec",
+   "status": "executable"
+  },
+  "MC3": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n15b",
+     "text": "[MC3] the late resource must be closed immediately"
+    }
+   ],
+   "patch": "mutation/patches/MC3.patch",
+   "sha256": "82a87a1d5bcd9fe6153f8874bcf5020fe0cbadb3093a9f70d4931908f48514e9",
+   "status": "executable"
+  },
+  "MC4": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n16",
+     "text": "[MC4] the hook must run on the first violation"
+    }
+   ],
+   "patch": "mutation/patches/MC4.patch",
+   "sha256": "a19d76e6519d84f05dd07fb4954d8974bd8eba2f426a1d0479bb6f4afa9e4e1a",
+   "status": "executable"
+  },
+  "MC5": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n16",
+     "text": "[MC5] the hook must not run again"
+    }
+   ],
+   "patch": "mutation/patches/MC5.patch",
+   "sha256": "84a4cb8598aa4ae4d51484ae46077ef8d91608705c17f368aa2e283027661f73",
+   "status": "executable"
+  },
+  "MC6": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n17",
+     "text": "[MC6] check must throw the stored violation"
+    }
+   ],
+   "patch": "mutation/patches/MC6.patch",
+   "sha256": "adcca5d5f926c15f337ab7ba6c5107b85b6b3a017062e4f04b5acdf4600e947c",
+   "status": "executable"
+  },
+  "MC7": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "emsg": "close failed",
+     "etype": "java.lang.RuntimeException",
+     "kind": "E",
+     "line": 213,
+     "test": "n20"
+    }
+   ],
+   "patch": "mutation/patches/MC7.patch",
+   "sha256": "adb157284d5e45bd7ac4d931311db91f51471c8cd8798c3a68d815ac0756bd3f",
+   "status": "executable"
+  },
+  "MC8": {
+   "cls": "conc",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n18",
+     "text": "[MC8] lookups"
+    }
+   ],
+   "patch": "mutation/patches/MC8.patch",
+   "sha256": "a59bbd4a97e4fd018758d322cdd7c712d4aed66dde47af071e40aa21ce29df11",
+   "status": "executable"
+  },
+  "MC9": {
+   "cls": "conc",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardCtxTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n14",
+     "text": "[MC9] every racing caller must see the one stored violation"
+    }
+   ],
+   "patch": "mutation/patches/MC9.patch",
+   "sha256": "21a92586c50a1ca77d07c2da8edfafa53ac26d57cea6e153a6756701e6cf799a",
+   "status": "executable"
+  },
+  "MD1": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardReasonTest",
+     "kind": "S",
+     "line": 42,
+     "test": "n2"
+    }
+   ],
+   "patch": "mutation/patches/MD1.patch",
+   "sha256": "b9e9eafc6dc7debc96929744a13b59da027d7dade798476f607fcf40a1551307",
+   "status": "executable"
+  },
+  "MH1": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t04d",
+     "text": "must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH1.patch",
+   "sha256": "66977744ef560cdb596bc3b4ac044deccfb00152bd7974e982ca5d537c31e8fe",
+   "status": "executable"
+  },
+  "MH10": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t04a",
+     "text": "'-a.com' must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH10.patch",
+   "sha256": "74e10ce960ce7832e18dfec6667b61242b5807f5d81af2691e375a419f087473",
+   "status": "executable"
+  },
+  "MH3": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n13",
+     "text": "254-char host is rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH3.patch",
+   "sha256": "1dfd0d98b4b02aa67dd75cca8fc0eb7924841407f6d069617c34b2273aa523bf",
+   "status": "executable"
+  },
+  "MH4": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n13",
+     "text": "64-char label is rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH4.patch",
+   "sha256": "ecfba3e9b3eb7904ac42a879fc51ae124c8f447e9da2f803bf6896a276febb30",
+   "status": "executable"
+  },
+  "MH5": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t04a",
+     "text": "'localhost' must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH5.patch",
+   "sha256": "bf3e9c73c49fba1682e87d6554a50e762ec9efa0ca6b2686040c11c60d7ea3de",
+   "status": "executable"
+  },
+  "MH6": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t04a",
+     "text": "'ab--cd.com' must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH6.patch",
+   "sha256": "1050b55b9fff96c0cc34d7e17d90094a67f701b23e5edf638a21ab325a7a2e2f",
+   "status": "executable"
+  },
+  "MH7": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t04a",
+     "text": "'0x7f.0.0.1' must be rejected"
+    }
+   ],
+   "patch": "mutation/patches/MH7.patch",
+   "sha256": "b7e52dafbe7e791043f35e46d8a7e67ac3aef0256a4d2c52aae3102cfb55163e",
+   "status": "executable"
+  },
+  "MH9": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "HostRuleTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "t04b",
+     "text": "'API.Example.COM' must be accepted"
+    }
+   ],
+   "patch": "mutation/patches/MH9.patch",
+   "sha256": "584a6a1541403a068bde9c2937bae7cef16c1d890a8544979f32502594da9ad9",
+   "status": "executable"
+  },
+  "MN1": {
+   "cls": "det",
+   "corroborating": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 106,
+     "test": "t12c"
+    },
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 118,
+     "test": "t12d"
+    }
+   ],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C1/dns-set",
+      "C1/handle",
+      "C1/interface",
+      "C1/private-dns-name",
+      "C1/private-dns-state"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN1.patch",
+   "sha256": "e3721b2ae8b33ba3c547e4e23fec7072d3e13fb7ba237c06889ce5a7fb10006d",
+   "status": "executable"
+  },
+  "MN10": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 275,
+     "test": "n24"
+    }
+   ],
+   "patch": "mutation/patches/MN10.patch",
+   "sha256": "8a88f0bd5a15ce5a67af3a92558d2b7b3cf7eda798f7cfefe07a78a7e85ff854",
+   "status": "executable"
+  },
+  "MN11": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n26",
+     "text": "[MN11] C0 security exception on the first read"
+    }
+   ],
+   "patch": "mutation/patches/MN11.patch",
+   "sha256": "26e6ddd46c44c271079b8bd233ab0462e2c4f8018b9e63e0a58f7a5b92452ab6",
+   "status": "executable"
+  },
+  "MN12": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "emsg": "NETWORK_CHANGED",
+     "etype": "dev.jarvis.assistant.net.GuardViolation",
+     "kind": "E",
+     "line": 154,
+     "test": "n21"
+    }
+   ],
+   "patch": "mutation/patches/MN12.patch",
+   "sha256": "5a231179791d7b33c407f56fa9329b67f7d02d1d68e44871936842b106e3f012",
+   "status": "executable"
+  },
+  "MN13": {
+   "cls": "det",
+   "corroborating": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 293,
+     "test": "n25"
+    }
+   ],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C1/handle",
+      "C2/handle",
+      "C3/handle",
+      "C4/handle"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN13.patch",
+   "sha256": "582fe8783e5de2c22e484e22e843ef3a2a29dae3425975931148b9f1fd86b6ae",
+   "status": "executable"
+  },
+  "MN14": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C1/interface",
+      "C2/interface",
+      "C3/interface",
+      "C4/interface"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN14.patch",
+   "sha256": "96646ffd0ef88ec797c2481831e91c7ec8c82c55536ae7eab1608f07dcf85bae",
+   "status": "executable"
+  },
+  "MN15": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "emsg": "NETWORK_CHANGED",
+     "etype": "dev.jarvis.assistant.net.GuardViolation",
+     "kind": "E",
+     "line": 330,
+     "test": "n27"
+    }
+   ],
+   "duplicate_behavior_of": "MN17",
+   "patch": "mutation/patches/MN15.patch",
+   "sha256": "89a2d3b7353c318fdd02e174ca199f46a9da133a7bfaa0aac75dc5aaf418c2de",
+   "status": "executable"
+  },
+  "MN16": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "forbid": null,
+     "kind": "A",
+     "test": "n26",
+     "text": "[MN11] C0 security exception on the second read"
+    }
+   ],
+   "patch": "mutation/patches/MN16.patch",
+   "sha256": "524e1bed96aaabab4d475ba59501b8c353af35f3ce2bb5009bc3f7105e18583e",
+   "status": "executable"
+  },
+  "MN17": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "emsg": "NETWORK_CHANGED",
+     "etype": "dev.jarvis.assistant.net.GuardViolation",
+     "kind": "E",
+     "line": 330,
+     "test": "n27"
+    }
+   ],
+   "duplicate_behavior_of": "MN15",
+   "patch": "mutation/patches/MN17.patch",
+   "sha256": "2198d58361b0701cb6b1014e61708a24efbd7c74020c870b559e2c805782e278",
+   "status": "executable"
+  },
+  "MN2": {
+   "cls": "det",
+   "corroborating": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 131,
+     "test": "t12e"
+    }
+   ],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C2/dns-set",
+      "C2/handle",
+      "C2/interface",
+      "C2/private-dns-name",
+      "C2/private-dns-state"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN2.patch",
+   "sha256": "54deb6dc669e886c250253ffdbafc6e102007c43e9331fe0e1b276e5d5b93e01",
+   "status": "executable"
+  },
+  "MN3": {
+   "cls": "det",
+   "corroborating": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 143,
+     "test": "t12f"
+    }
+   ],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C3/dns-set",
+      "C3/handle",
+      "C3/interface",
+      "C3/private-dns-name",
+      "C3/private-dns-state"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN3.patch",
+   "sha256": "7743332109dd70b92c5eb2cdc53f7a5885a7b7a008725a598cb692c7f0aeed0c",
+   "status": "executable"
+  },
+  "MN4": {
+   "cls": "det",
+   "corroborating": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 345,
+     "test": "n28"
+    }
+   ],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C4/dns-set",
+      "C4/handle",
+      "C4/interface",
+      "C4/private-dns-name",
+      "C4/private-dns-state"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN4.patch",
+   "sha256": "c5680471822749336d71f2834b4cfd98f1e3f70b8c58a24b1ec60edc0a984c4e",
+   "status": "executable"
+  },
+  "MN5": {
+   "cls": "det",
+   "corroborating": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 234,
+     "test": "n23"
+    }
+   ],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C1/dns-set",
+      "C2/dns-set",
+      "C3/dns-set",
+      "C4/dns-set"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN5.patch",
+   "sha256": "2667366cb556d0dfab9d55b86e153eb6a7c238bd288364e359bf1cfda3179f21",
+   "status": "executable"
+  },
+  "MN7": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "emsg": "NETWORK_CHANGED",
+     "etype": "dev.jarvis.assistant.net.GuardViolation",
+     "kind": "E",
+     "line": 227,
+     "test": "n23"
+    }
+   ],
+   "patch": "mutation/patches/MN7.patch",
+   "sha256": "3bcb50b180475331f7b500af158376e8082fddbec24df26d25c57d132b7763e6",
+   "status": "executable"
+  },
+  "MN8": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "keys": [
+      "C1/private-dns-name",
+      "C1/private-dns-state",
+      "C2/private-dns-name",
+      "C2/private-dns-state",
+      "C3/private-dns-name",
+      "C3/private-dns-state",
+      "C4/private-dns-name",
+      "C4/private-dns-state"
+     ],
+     "kind": "N22",
+     "test": "n22"
+    }
+   ],
+   "patch": "mutation/patches/MN8.patch",
+   "sha256": "9165396281b6709e6caa99a645e42019902f6df85430a957d018555b5725ecb6",
+   "status": "executable"
+  },
+  "MN9": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "NetworkSnapshotTest",
+     "kind": "H",
+     "line": 268,
+     "test": "n24"
+    }
+   ],
+   "patch": "mutation/patches/MN9.patch",
+   "sha256": "70b60cbb7c2239d835a1e61a34cee388d4bc8f5b0f3f143b5af40ade8689688c",
+   "status": "executable"
+  },
+  "MR1": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardReasonTest",
+     "kind": "S",
+     "line": 16,
+     "test": "n1a"
+    }
+   ],
+   "patch": "mutation/patches/MR1.patch",
+   "sha256": "19759bd9928c642523ccdf2763cfc6786e9a12963e8dad0b527abb9bde286cf8",
+   "status": "executable"
+  },
+  "MR2": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardReasonTest",
+     "kind": "S",
+     "line": 23,
+     "test": "n1b"
+    }
+   ],
+   "patch": "mutation/patches/MR2.patch",
+   "sha256": "9b21258f6239facca9fe33e5324d8f7b6a9296a6d9b2b802a80f0b8bca20bb6c",
+   "status": "executable"
+  },
+  "MR3": {
+   "cls": "det",
+   "corroborating": [],
+   "designated": [
+    {
+     "cls": "GuardReasonTest",
+     "kind": "S",
+     "line": 75,
+     "test": "n4"
+    }
+   ],
+   "patch": "mutation/patches/MR3.patch",
+   "sha256": "eee993cc6cab5cb8994dacc6bb67ee487fa33a17d52e342cae1157f09aa72072",
+   "status": "executable"
+  }
+ }
+}

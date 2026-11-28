@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardReason.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardReason.kt
+@@ -22,6 +22,7 @@
+     SECOND_NETWORK_PASS,
+     NETWORK_CHANGED,
+     NETWORK_STATE_UNAVAILABLE,
++    EXTRA_REASON,
+ }
+ 
+ /**

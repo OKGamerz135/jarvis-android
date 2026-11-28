@@ -1,0 +1,12 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -56,8 +56,7 @@
+             other.network == network &&
+             other.interfaceName == interfaceName &&
+             other.dnsServers == dnsServers &&
+-            other.privateDnsActive == privateDnsActive &&
+-            other.privateDnsServerName == privateDnsServerName
++            true
+ 
+     override fun hashCode(): Int {
+         var h = network.hashCode()

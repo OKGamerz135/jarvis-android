@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
+@@ -20,7 +20,7 @@
+     /** Returns the canonical (lowercase) host, or null if the input is rejected. */
+     fun validate(raw: String): String? {
+         if (raw.isEmpty() || raw.any { it.code > 0x7f }) return null
+-        val h = raw.lowercase()
++        val h = raw
+         if (h.any { !(it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '-') }) return null
+         if (h.length > 253 || h.endsWith(".")) return null
+         val labels = h.split('.')

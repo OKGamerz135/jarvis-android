@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -53,7 +53,6 @@
+ ) {
+     override fun equals(other: Any?): Boolean =
+         other is NetworkFingerprint &&
+-            other.network == network &&
+             other.interfaceName == interfaceName &&
+             other.dnsServers == dnsServers &&
+             other.privateDnsActive == privateDnsActive &&

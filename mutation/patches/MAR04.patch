@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
+@@ -79,7 +79,6 @@
+         entry("0.0.0.0/8", AddressClass.UNSPECIFIED),
+         entry("10.0.0.0/8", AddressClass.PRIVATE),
+         entry("172.16.0.0/12", AddressClass.PRIVATE),
+-        entry("192.168.0.0/16", AddressClass.PRIVATE),
+         entry("100.64.0.0/10", AddressClass.SHARED),
+         entry("127.0.0.0/8", AddressClass.LOOPBACK),
+         entry("169.254.0.0/16", AddressClass.LINK_LOCAL),

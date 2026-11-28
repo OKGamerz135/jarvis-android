@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/HostRule.kt
+@@ -11,7 +11,7 @@
+  * Pure logic: no OkHttp type, no android.net import.
+  */
+ internal object HostRule {
+-    private val LABEL = Regex("[a-z0-9]([a-z0-9-]*[a-z0-9])?")
++    private val LABEL = Regex("[a-z0-9-]([a-z0-9-]*[a-z0-9])?")
+ 
+     // Defence in depth only. Matches strings that OkHttp's own parser would treat as an IP
+     // address: anything with a colon, or digits and dots only.

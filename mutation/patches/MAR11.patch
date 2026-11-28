@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
+@@ -86,7 +86,6 @@
+         entry("168.63.129.16/32", AddressClass.METADATA),
+         entry("224.0.0.0/4", AddressClass.MULTICAST),
+         entry("192.0.0.0/24", AddressClass.SPECIAL_PURPOSE),
+-        entry("192.0.2.0/24", AddressClass.SPECIAL_PURPOSE),
+         entry("192.31.196.0/24", AddressClass.SPECIAL_PURPOSE),
+         entry("192.52.193.0/24", AddressClass.SPECIAL_PURPOSE),
+         entry("192.88.99.0/24", AddressClass.SPECIAL_PURPOSE),

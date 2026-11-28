@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -147,7 +147,6 @@
+     /** C4: after TLS, immediately before the first request byte. Later checkpoints read nothing. */
+     fun <T> beforeFirstRequestByte(send: () -> T): T {
+         verify()
+-        finished = true
+         return send()
+     }
+ 

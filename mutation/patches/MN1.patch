@@ -1,0 +1,10 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -129,7 +129,6 @@
+ 
+     /** C1: before a socket is created or bound. */
+     fun <T> beforeSocketCreation(action: () -> T): T {
+-        verify()
+         return action()
+     }
+ 

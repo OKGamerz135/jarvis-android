@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/AddressPolicy.kt
+@@ -104,7 +104,7 @@
+             ((b[2].toInt() and 255) shl 8) or (b[3].toInt() and 255)
+         var best: Entry? = null
+         for (e in TABLE) {
+-            if ((v and e.mask) == e.network && (best == null || e.prefixLength > best.prefixLength)) best = e
++            if (v == e.network && (best == null || e.prefixLength > best.prefixLength)) best = e
+         }
+         return best?.addressClass ?: AddressClass.PUBLIC
+     }

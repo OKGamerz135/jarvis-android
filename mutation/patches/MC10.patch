@@ -1,0 +1,16 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardCtx.kt
+@@ -47,11 +47,8 @@
+      * resource is closed at once and the stored violation is thrown.
+      */
+     fun register(resource: Closeable) {
+-        val poisoned: GuardViolation?
+-        synchronized(lock) {
+-            poisoned = first.get()
+-            if (poisoned == null) resources.add(resource)
+-        }
++        val poisoned: GuardViolation? = first.get()
++        if (poisoned == null) synchronized(lock) { resources.add(resource) }
+         if (poisoned != null) {
+             closeQuietly(resource)
+             throw poisoned

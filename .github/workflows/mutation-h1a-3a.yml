@@ -1,0 +1,111 @@
+name: H1a-3a mutation stage (scratch branch only)
+
+# Temporary infrastructure for the authorised H1a-3a Approval B stage. Lives only on scratch/h1a-3a-mutation.
+# It never runs on main or build-47-phase-c. Nothing here publishes, signs or touches secrets.
+on:
+  push:
+    branches: [scratch/h1a-3a-mutation]
+
+permissions: {}
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash mutation/ensure-sdk.sh
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - name: Unmutated full-suite control
+        run: |
+          mkdir -p results/control
+          git rev-parse HEAD > results/control/head.sha
+          git status --short > results/control/git-status.txt
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee results/control/full.log
+          rm -rf results/control/xml; cp -r app/build/test-results/testDebugUnitTest results/control/xml
+          python3 mutation/collect.py results/control/xml results/control/full.json
+          python3 scripts/summarize-tests.py app/build/test-results/testDebugUnitTest | tee results/control/summary.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: res-control
+          path: results/control
+          retention-days: 30
+
+  det:
+    needs: control
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        id: [MA1, MA2, MA5, MA6, MA8, MAR01, MAR02, MAR03, MAR04, MAR05, MAR06, MAR07, MAR08, MAR09, MAR10, MAR11, MAR12, MAR13, MAR14, MAR15, MAR16, MAR17, MAR18, MAR19, MC1, MC11, MC2, MC3, MC4, MC5, MC6, MC7, MD1, MH1, MH10, MH3, MH4, MH5, MH6, MH7, MH9, MN1, MN10, MN11, MN12, MN13, MN14, MN15, MN16, MN17, MN2, MN3, MN4, MN5, MN7, MN8, MN9, MR1, MR2, MR3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash mutation/ensure-sdk.sh
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - name: Control then mutant ${{ matrix.id }}
+        run: |
+          chmod +x gradlew
+          bash mutation/run_det.sh "${{ matrix.id }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: res-${{ matrix.id }}
+          path: results/${{ matrix.id }}
+          retention-days: 30
+
+  conc:
+    needs: control
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {id: MC8,  method: n18_counters_are_atomic}
+          - {id: MC9,  method: n14_first_violation_wins_when_threads_race}
+          - {id: MC10, method: n15c_a_resource_racing_with_a_violation_is_always_closed_exactly_once}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash mutation/ensure-sdk.sh
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - name: 30 baseline runs, then 30 runs of ${{ matrix.id }}
+        run: |
+          chmod +x gradlew
+          bash mutation/run_conc.sh "${{ matrix.id }}" "${{ matrix.method }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: res-${{ matrix.id }}
+          path: results/${{ matrix.id }}
+          retention-days: 30

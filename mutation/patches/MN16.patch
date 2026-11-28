@@ -1,0 +1,11 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/NetworkSnapshot.kt
+@@ -174,7 +174,7 @@
+         try {
+             result = source.linkState(net)
+         } catch (e: Exception) {
+-            ctx.violate(GuardReason.NETWORK_STATE_UNAVAILABLE)
++            ctx.violate(GuardReason.NETWORK_CHANGED)
+         }
+         return result ?: ctx.violate(GuardReason.NETWORK_CHANGED)
+     }

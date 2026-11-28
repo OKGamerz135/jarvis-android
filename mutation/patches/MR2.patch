@@ -1,0 +1,8 @@
+--- a/app/src/main/java/dev/jarvis/assistant/net/GuardReason.kt
++++ b/app/src/main/java/dev/jarvis/assistant/net/GuardReason.kt
+@@ -45,4 +45,4 @@
+ internal class GuardViolationException(
+     val reason: GuardReason,
+     val category: AddressClass? = null,
+-) : RuntimeException(reason.name)
++) : java.io.IOException(reason.name)
