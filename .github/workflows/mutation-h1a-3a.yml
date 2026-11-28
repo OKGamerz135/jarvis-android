@@ -59,18 +59,26 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - id: sel
+        name: Select (rerun subset, if mutation/only.txt exists)
+        run: |
+          if [ -f mutation/only.txt ] && ! grep -qx "${{ matrix.id }}" mutation/only.txt; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        if: steps.sel.outputs.run == 'true'
         with:
           distribution: temurin
           java-version: '17'
       - run: bash mutation/ensure-sdk.sh
+        if: steps.sel.outputs.run == 'true'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        if: steps.sel.outputs.run == 'true'
       - name: Control then mutant ${{ matrix.id }}
+        if: steps.sel.outputs.run == 'true'
         run: |
           chmod +x gradlew
           bash mutation/run_det.sh "${{ matrix.id }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: always() && steps.sel.outputs.run == 'true'
         with:
           name: res-${{ matrix.id }}
           path: results/${{ matrix.id }}
@@ -93,18 +101,26 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - id: sel
+        name: Select (rerun subset, if mutation/only.txt exists)
+        run: |
+          if [ -f mutation/only.txt ] && ! grep -qx "${{ matrix.id }}" mutation/only.txt; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        if: steps.sel.outputs.run == 'true'
         with:
           distribution: temurin
           java-version: '17'
       - run: bash mutation/ensure-sdk.sh
+        if: steps.sel.outputs.run == 'true'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        if: steps.sel.outputs.run == 'true'
       - name: 30 baseline runs, then 30 runs of ${{ matrix.id }}
+        if: steps.sel.outputs.run == 'true'
         run: |
           chmod +x gradlew
           bash mutation/run_conc.sh "${{ matrix.id }}" "${{ matrix.method }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: always() && steps.sel.outputs.run == 'true'
         with:
           name: res-${{ matrix.id }}
           path: results/${{ matrix.id }}

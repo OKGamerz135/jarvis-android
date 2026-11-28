@@ -9,7 +9,7 @@ def ld(p):
     except Exception: return None
 def slim(r):
     if not r: return r
-    r = dict(r); r['failing'] = [dict(f, message=(f.get('message') or '')[:6000], stack_head=(f.get('stack_head') or [])[:6]) for f in r.get('failing', [])]
+    r = dict(r); r['failing'] = [dict(f, message=(f.get('message') or '')[:6000], stack_head=(f.get('stack_head') or [])[:10]) for f in r.get('failing', [])]
     r.pop('ran', None); return r
 kind = sys.argv[1]
 if kind == 'det':
