@@ -38,6 +38,9 @@ class GuardReasonTest {
             assertTrue(shape.matches(e.message!!))
             assertEquals(null, v.cause)
             assertEquals(null, e.cause)
+            // A category never reaches the message.
+            assertEquals(r.name, GuardViolation(r, AddressClass.PRIVATE).message)
+            assertEquals(r.name, GuardViolationException(r, AddressClass.PRIVATE).message)
         }
     }
 
@@ -48,6 +51,9 @@ class GuardReasonTest {
         for (r in all) {
             assertSame(r, GuardViolation(r).reason)
             assertSame(r, GuardViolationException(r).reason)
+            assertEquals(null, GuardViolation(r).category)
+            assertSame(AddressClass.METADATA, GuardViolation(r, AddressClass.METADATA).category)
+            assertSame(AddressClass.MULTICAST, GuardViolationException(r, AddressClass.MULTICAST).category)
         }
     }
 
